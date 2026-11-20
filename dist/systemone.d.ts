@@ -9,10 +9,8 @@
  * knowing anything about kenari.
  *
  * The models come from `GET /v1/models?modality=systemone` — they are absent
- * from the bare chat catalog. Clairic is excluded here because it answers
- * `fields` extraction and rejects `questions`, which a `typesafe` judge cannot
- * send. For the full kenari contract (Clairic fields, `box` questions, audio
- * and video input) use the `system_one` tool instead.
+ * from the bare chat catalog. For the full kenari contract (`box` questions,
+ * audio and video input) use the `system_one` tool instead.
  *
  * Base URL note: the `typesafe` wire targets `{baseUrl}/v1/systemone`, so these
  * models carry {@link BASE_URL_KENARI_ORIGIN} — the origin, without `/v1` —
@@ -79,8 +77,7 @@ export declare function toKenariSystemOneModels(apiModels: KenariApiModel[]): Ke
  */
 export declare function toProviderJudgeConfigs(models: KenariSystemOneModel[]): KenariSystemOneModelConfig[];
 /**
- * Static baseline, mirroring the live `?modality=systemone` catalog. Clairic is
- * intentionally absent: it answers `fields` extraction only.
+ * Static baseline, mirroring the live `?modality=systemone` catalog.
  */
 export declare const KENARI_SYSTEMONE_BASELINE_MODELS: KenariSystemOneModel[];
 /** Get the baseline System One judge models for offline init. */
@@ -94,15 +91,10 @@ export declare function getKenariSystemOneBaselineModels(): KenariSystemOneModel
  */
 export declare function getKenariSystemOneInputRate(modelId: string): number;
 /**
- * What a System One model can answer. Clairic is the only `fields` model;
- * everything else answers `questions` and rejects `fields`.
- */
-export type KenariSystemOneCapability = "questions" | "fields";
-/**
- * A catalog entry, for choosing a model rather than running one. Wider than
- * `KenariSystemOneModel`, which is a pi classifier: this keeps Clairic (which
- * answers `fields` and can never be a classifier), the catalog's raw input
- * modalities, and the rate kenari quotes, so a caller can justify a choice.
+ * A catalog entry, for choosing a model rather than running one.
+ *
+ * Keeps the catalog's raw input modalities and the rate kenari quotes, so a
+ * caller can justify a choice rather than guess.
  */
 export interface KenariSystemOneModelInfo {
     id: string;
@@ -110,15 +102,14 @@ export interface KenariSystemOneModelInfo {
     isFree: boolean;
     /** Input modalities the model accepts: text, image, audio, video. */
     input: string[];
-    capabilities: KenariSystemOneCapability[];
     /** Catalog rate in micro-Rupiah per 1M input tokens; absent when free. */
     inputMicroIdr?: number;
 }
-/** Convert a questions-capable classifier model to a catalog entry. */
+/** Convert a judge model to a catalog entry. */
 export declare function toKenariSystemOneModelInfo(model: KenariSystemOneModel): KenariSystemOneModelInfo;
 /** Convert a live `?modality=systemone` entry to a catalog entry. */
 export declare function apiModelToKenariSystemOneModelInfo(apiModel: KenariApiModel): KenariSystemOneModelInfo | null;
-/** The static catalog: every baseline model, then Clairic. */
+/** The static catalog: every baseline model. */
 export declare const KENARI_SYSTEMONE_MODEL_INFO: readonly KenariSystemOneModelInfo[];
 /**
  * The catalog model choice resolves against: the live one while it is fresh,
@@ -148,7 +139,7 @@ export declare function fetchKenariSystemOneModels(signal?: AbortSignal): Promis
  * The key is unused — the catalog endpoint is public — but the signature is
  * fixed by the contract. A failed fetch degrades to the static baseline so an
  * offline start still offers judge models; the live fetch also refreshes the
- * model-choice catalog, which keeps Clairic even though the judge list drops it.
+ * model-choice catalog.
  */
 export declare function fetchKenariSystemOneDynamicModels(_apiKey: string | undefined): Promise<KenariSystemOneModel[]>;
 //# sourceMappingURL=systemone.d.ts.map

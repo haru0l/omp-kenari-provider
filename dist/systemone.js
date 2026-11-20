@@ -9,10 +9,8 @@
  * knowing anything about kenari.
  *
  * The models come from `GET /v1/models?modality=systemone` — they are absent
- * from the bare chat catalog. Clairic is excluded here because it answers
- * `fields` extraction and rejects `questions`, which a `typesafe` judge cannot
- * send. For the full kenari contract (Clairic fields, `box` questions, audio
- * and video input) use the `system_one` tool instead.
+ * from the bare chat catalog. For the full kenari contract (`box` questions,
+ * audio and video input) use the `system_one` tool instead.
  *
  * Base URL note: the `typesafe` wire targets `{baseUrl}/v1/systemone`, so these
  * models carry {@link BASE_URL_KENARI_ORIGIN} — the origin, without `/v1` —
@@ -61,7 +59,14 @@ function microInputRate(pricing) {
 function paidRate(microIdr) {
     return { cost: systemOneCost({ input: microIdr }), inputMicroIdr: microIdr };
 }
-/** Model families that answer `fields` extraction only and cannot run questions. */
+/**
+ * Model families that answer `fields` extraction only and reject `questions`.
+ *
+ * This build has no `fields` mode, and a `typesafe` judge only sends
+ * `questions`, so such a model would 400 on every judge call. kenari still
+ * lists `clairic:free` in the live catalog, so it is filtered out of both the
+ * judge list and the model-choice catalog rather than offered and failing.
+ */
 function isFieldsOnly(id) {
     return id.startsWith("clairic");
 }
@@ -131,8 +136,7 @@ export function toProviderJudgeConfigs(models) {
 // Baseline catalog (offline fallback)
 // =============================================================================
 /**
- * Static baseline, mirroring the live `?modality=systemone` catalog. Clairic is
- * intentionally absent: it answers `fields` extraction only.
+ * Static baseline, mirroring the live `?modality=systemone` catalog.
  */
 export const KENARI_SYSTEMONE_BASELINE_MODELS = [
     {
@@ -242,24 +246,15 @@ export function getKenariSystemOneInputRate(modelId) {
     const model = KENARI_SYSTEMONE_BASELINE_MODELS.find((m) => m.id === modelId);
     return model?.cost.input ?? 0;
 }
-/** Clairic answers `fields` extraction only, so it is never a classifier. */
-const CLAIRIC_MODEL_INFO = {
-    id: "clairic:free",
-    name: "Clairic",
-    isFree: true,
-    input: ["text", "image"],
-    capabilities: ["fields"],
-};
-/** Convert a questions-capable classifier model to a catalog entry. */
+/** Convert a judge model to a catalog entry. */
 export function toKenariSystemOneModelInfo(model) {
     return {
         id: model.id,
         name: model.name,
         isFree: model.isFree === true,
-        // A classifier carries text and image only: pi cannot send audio or video,
-        // and the tool's assets are PNG/JPEG.
+        // A typesafe judge carries text and image only: omp cannot send audio or
+        // video, and the tool's assets are PNG/JPEG.
         input: [...model.input],
-        capabilities: ["questions"],
         ...(model.inputMicroIdr !== undefined
             ? { inputMicroIdr: model.inputMicroIdr }
             : {}),
@@ -268,7 +263,8 @@ export function toKenariSystemOneModelInfo(model) {
 /** Convert a live `?modality=systemone` entry to a catalog entry. */
 export function apiModelToKenariSystemOneModelInfo(apiModel) {
     const id = apiModel.id;
-    if (!id)
+    // Nothing here can send `fields`, so a fields-only model is not a choice.
+    if (!id || isFieldsOnly(id))
         return null;
     const isFree = id.endsWith(":free") || apiModel.pricing?.free === true;
     const microInput = microInputRate(apiModel.pricing);
@@ -277,17 +273,13 @@ export function apiModelToKenariSystemOneModelInfo(apiModel) {
         name: apiModel.name ?? id,
         isFree,
         input: [...(apiModel.modalities?.input ?? ["text"])],
-        capabilities: isFieldsOnly(id) ? ["fields"] : ["questions"],
         ...(!isFree && microInput !== undefined
             ? { inputMicroIdr: microInput }
             : {}),
     };
 }
-/** The static catalog: every baseline model, then Clairic. */
-export const KENARI_SYSTEMONE_MODEL_INFO = [
-    ...KENARI_SYSTEMONE_BASELINE_MODELS.map(toKenariSystemOneModelInfo),
-    CLAIRIC_MODEL_INFO,
-];
+/** The static catalog: every baseline model. */
+export const KENARI_SYSTEMONE_MODEL_INFO = KENARI_SYSTEMONE_BASELINE_MODELS.map(toKenariSystemOneModelInfo);
 /** How long a fetched catalog is trusted before model choice re-fetches it. */
 const MODEL_INFO_TTL_MS = 5 * 60_000;
 let modelInfoCache;
@@ -352,7 +344,7 @@ export async function fetchKenariSystemOneModels(signal) {
  * The key is unused — the catalog endpoint is public — but the signature is
  * fixed by the contract. A failed fetch degrades to the static baseline so an
  * offline start still offers judge models; the live fetch also refreshes the
- * model-choice catalog, which keeps Clairic even though the judge list drops it.
+ * model-choice catalog.
  */
 export async function fetchKenariSystemOneDynamicModels(_apiKey) {
     try {

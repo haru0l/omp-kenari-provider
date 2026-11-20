@@ -10,14 +10,13 @@ call. Read this when you need exact shapes rather than the everyday patterns in
 | Thing | Limit |
 | --- | --- |
 | `questions` | 128 per call |
-| `fields` | 64 per call |
 | `assets` | 16 images per call |
 | Image formats | PNG, JPEG (`png`, `jpg`, `jpeg`) |
 | Audio | up to 4 clips, 8 MiB each |
 | Video | up to 2 files, 16 MiB each |
 
-`questions` and `fields` are mutually exclusive. `state` is required for
-questions; a `fields` call may omit it only when it also sends an image.
+`state` is required: everything the judge may look at has to be in `state` or
+in an image asset.
 
 ## Question types
 
@@ -75,29 +74,6 @@ Takes no `criteria`; the image must be in `assets` and cited in `instructions`.
 Answer: `{ "type": "box", "box": { "top": 0.71, "bottom": 0.78, "left": 0.12, "right": 0.63 } }`
 — every edge is a fraction of image width/height, 0–1, not pixels.
 
-## Field types (Clairic)
-
-`fields` maps a name to a typed read-out of `state`:
-
-```json
-{
-  "total":  { "type": "number", "unit": "IDR", "integer": true },
-  "due":    { "type": "date" },
-  "items":  { "type": "list", "items": { "type": "text" } },
-  "eta":    { "type": "estimate" },
-  "q3":     { "type": "forecast", "horizon": "3 months" }
-}
-```
-
-| Type | Value |
-| --- | --- |
-| `text` | string |
-| `number` | number (`unit`, `integer`, `decimals`, `min`, `max`, `step`) |
-| `date` / `time` / `datetime` | ISO string |
-| `duration` | number in the unit you set |
-| `list` | array of item values |
-| `estimate` | number with `median`, `p10`, `p90` |
-| `forecast` | like `estimate`, over `horizon` |
 
 Answer: `{ "type": "field", "value": 42000, "guess": 42000, "p_null": 0.02, "confidence": 0.95, "span": [12, 24] }`.
 
@@ -110,21 +86,20 @@ Answer: `{ "type": "field", "value": 42000, "guess": 42000, "p_null": 0.02, "con
 
 ## Models
 
-| Id | Accepts | Answers | Pricing |
-| --- | --- | --- | --- |
-| `clef:free` | text, image | questions | free |
-| `clef-flash:free` | text, image | questions | free |
-| `clef-omni:free` | text, image, audio, video | questions | free |
-| `clef` | text | questions | paid, per input token |
-| `jev-1-13` | text | questions | paid, per input token |
-| `jev-1-14` | text, image | questions | paid, per input token |
-| `clairic:free` | text, image | `fields` only | free |
+| Id | Accepts | Pricing |
+| --- | --- | --- |
+| `clef:free` | text, image | free |
+| `clef-flash:free` | text, image | free |
+| `clef-omni:free` | text, image, audio, video | free |
+| `clef` | text | paid, per input token |
+| `jev-1-13` | text | paid, per input token |
+| `jev-1-14` | text, image | paid, per input token |
 
 `clef` and `jev-1-13` are **text-only**: they cannot read `assets`. The tool
 rejects an image sent to either before the request leaves.
 
-`system_one` with `{"action": "models"}` prints this list with live prices and a
-default for each request shape; prefer it over this table, which can go stale.
+`system_one` with `{"action": "models"}` prints this list with live prices and
+the default model; prefer it over this table, which can go stale.
 
 The live list is `GET https://kenari.id/v1/models?modality=systemone`; the
 provider also registers every questions-capable model as an omp judge model
@@ -137,6 +112,5 @@ The endpoint answers non-2xx with a JSON `error` message; the tool rethrows it a
 `kenari systemone failed (<status>): <message>`. Common causes:
 
 - `401` — missing or wrong key. Run `/login kenari` or set `KENARI_API_KEY`.
-- `400` unknown field/question type — check the type names above.
-- `400` questions plus fields — send one or the other.
+- `400` unknown question type — check the type names above.
 - `400` oversized asset — compress or downscale the image before sending.

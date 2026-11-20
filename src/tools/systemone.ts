@@ -3,8 +3,8 @@
  *
  * Adapted from pi-system-one v1.3.4 (MIT, https://github.com/iamaamir/system-one),
  * retargeted at kenari's POST /v1/systemone: models come from
- * `?modality=systemone`, questions may be noul / choice / score / box, Clairic
- * `fields` extraction is available, and images travel as named `assets`.
+ * `?modality=systemone`, questions may be noul / choice / score / box, and
+ * images travel as named `assets`.
  */
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
@@ -61,7 +61,7 @@ export const systemOneParams: TSchema = Type.Object(
     action: Type.Optional(
       Type.String({
         description:
-          'What to do: "models" lists the System One models (id, free/paid, text vs image input, questions vs fields, input price) and judges nothing. Omit it to judge.',
+          'What to do: "models" lists the System One models (id, free/paid, text vs image input, input price) and judges nothing. Omit it to judge.',
       }),
     ),
     state: Type.Optional(
@@ -86,25 +86,13 @@ export const systemOneParams: TSchema = Type.Object(
     model: Type.Optional(
       Type.String({
         description:
-          'Which System One model judges the request. Omit it and the tool picks free-first: clef:free, then clef-flash:free, then any other free model that fits (clairic:free for fields, an image-capable free model when assets are sent) — a paid model is used only when no free model can answer. Call action: "models" for the current list, prices and capabilities; an unknown or unsuitable id is rejected with what fits.',
-      }),
-    ),
-    fields: Type.Optional(
-      Type.Any({
-        description:
-          'Clairic extraction: a name-keyed map of fields to read out of the state, e.g. {"total": {"type": "number", "unit": "IDR"}}. Send this or questions, not both. Field types: text, number, date, time, datetime, duration, list, estimate, forecast.',
+          'Which System One model judges the request. Omit it and the tool picks free-first: clef:free, then clef-flash:free, then any other free model that fits (an image-capable free model when assets are sent) — a paid model is used only when no free model can answer. Call action: "models" for the current list, prices and input modalities; an unknown or unsuitable id is rejected with what fits.',
       }),
     ),
     assets: Type.Optional(
       Type.Any({
         description:
           'Images under reference names you can cite in instructions, e.g. {"receipt": {"path": "./receipt.png"}} or {"receipt": {"data_base64": "iVBORw0...", "format": "png"}}. A relative path resolves against the working directory. Up to 16.',
-      }),
-    ),
-    reference_date: Type.Optional(
-      Type.String({
-        description:
-          "Clairic only: ISO date that anchors dates written without a year.",
       }),
     ),
   },
@@ -127,8 +115,6 @@ const PASSTHROUGH_KEYS: readonly string[] = [
   "action",
   "questions",
   "model",
-  "fields",
-  "reference_date",
   "assets",
 ];
 
@@ -1117,7 +1103,7 @@ export interface SystemOneDetails {
 function assertAnswerableQuestions(questions: unknown): void {
   if (questions === undefined) {
     throw new Error(
-      'system_one: questions is required (or "fields" for Clairic extraction). Provide at least one named question, e.g. {"q1": {"type": "choice", "instructions": "...", "criteria": {"a": null}}}.',
+      'system_one: questions is required. Provide at least one named question, e.g. {"q1": {"type": "choice", "instructions": "...", "criteria": {"a": null}}}.',
     );
   }
   // The semantic gate is authoritative: anything that is not a question
@@ -1182,47 +1168,6 @@ function assertAnswerableQuestions(questions: unknown): void {
   }
 }
 
-/** Field types Clairic accepts. Anything else is a caller mistake worth naming. */
-const FIELD_TYPES = new Set([
-  "text",
-  "number",
-  "date",
-  "time",
-  "datetime",
-  "duration",
-  "list",
-  "estimate",
-  "forecast",
-]);
-
-/**
- * Clairic `fields` gate. A field map holds up to 64 named fields, each with a
- * known type and optional `instructions`; type settings pass through as-is.
- */
-function assertAnswerableFields(fields: unknown): void {
-  if (!isRecord(fields)) {
-    throw new Error(
-      'system_one: "fields" must be an object keyed by field name, e.g. {"total": {"type": "number"}}.',
-    );
-  }
-  if (Object.keys(fields).length === 0) {
-    throw new Error("system_one: at least one field is required in fields.");
-  }
-  for (const [name, value] of Object.entries(fields)) {
-    if (!isRecord(value)) {
-      throw new Error(
-        `system_one: field "${name}" must be an object with a "type", e.g. {"type": "text"}.`,
-      );
-    }
-    const type = typeof value.type === "string" ? value.type : undefined;
-    if (type === undefined || !FIELD_TYPES.has(type)) {
-      const got = type === undefined ? "missing" : `"${type}"`;
-      throw new Error(
-        `system_one: field "${name}" has unknown type ${got}; use one of ${[...FIELD_TYPES].join(", ")}.`,
-      );
-    }
-  }
-}
 
 /**
  * Answer `action: "models"`: fetch the catalog, cache it for model choice, and
@@ -1237,16 +1182,10 @@ async function renderModelCatalogAction(
   details: SystemOneDetails;
 }> {
   const catalog = await fetchKenariSystemOneModelCatalog(signal);
-  const defaults = {
-    questions: defaultSystemOneModel(
-      { fields: false, images: false },
-      catalog.models,
-    ).id,
-    fields: defaultSystemOneModel(
-      { fields: true, images: false },
-      catalog.models,
-    ).id,
-  };
+  const defaultModel = defaultSystemOneModel(
+    { images: false },
+    catalog.models,
+  ).id;
 
   return {
     content: [
@@ -1254,7 +1193,7 @@ async function renderModelCatalogAction(
         type: "text" as const,
         text: renderSystemOneModelCatalog(
           catalog.models,
-          defaults,
+          defaultModel,
           catalog.source,
         ),
       },
@@ -1263,7 +1202,7 @@ async function renderModelCatalogAction(
     // index signature, which a declared interface never carries.
     structuredContent: {
       models: catalog.models,
-      defaults,
+      defaultModel,
       source: catalog.source,
       metadata: { provider: PROVIDER_KENARI },
     } as unknown as JsonValue,
@@ -1409,9 +1348,8 @@ export const systemOneTool: ToolDefinition<
     "score criteria is an ordered array of at least two levels, " +
     'box takes no criteria and needs an image under "assets". ' +
     'Pick the question type mechanically: unordered alternatives (frontend, backend, platform) -> choice; yes/no -> noul; ordered scale, rating, severity, risk, or grade -> score; where in an image something is -> box with the image under assets. Never use choice for an ordered scale merely because its levels have names: very low / low / moderate / high / very high is score, not choice. ' +
-    'Clairic models extract structured data instead: send "fields" with typed entries (text, number, date, list, estimate, ...). ' +
     'Images travel under reference names in "assets" - cite the name in instructions. ' +
-    "Models: clef:free (default), clef-flash:free, clef-omni:free, clef, jev-1-13, jev-1-14; clairic:free handles fields. Omitting model is free-first: clef:free, then clef-flash:free, then the other free models, and only then a paid one.",
+    "Models: clef:free (default), clef-flash:free, clef-omni:free, clef, jev-1-13, jev-1-14. Omitting model is free-first: clef:free, then clef-flash:free, then the other free models, and only then a paid one.",
 
   parameters: systemOneParams,
 
@@ -1455,29 +1393,20 @@ export const systemOneTool: ToolDefinition<
       return renderModelCatalogAction(signal);
     }
 
-    const fields = request.fields;
-    if (fields !== undefined && request.questions !== undefined) {
-      throw new Error(
-        'system_one: send either "questions" or "fields", not both.',
-      );
-    }
-    if (fields !== undefined) assertAnswerableFields(fields);
-    else assertAnswerableQuestions(request.questions);
+    assertAnswerableQuestions(request.questions);
 
     const assets = await resolveAssets(request.assets, ctx.cwd);
-    // Clairic can read the state off an image alone; questions cannot.
-    if (request.state === undefined && assets === undefined) {
+    if (request.state === undefined) {
       throw new Error(
-        'system_one: state is required. Put the material under judgment in "state" (string or object), e.g. {"state": "<evidence>", "questions": {...}}. A fields call may omit it only when it also sends an image under "assets".',
+        'system_one: state is required. Put the material under judgment in "state" (string or object), e.g. {"state": "<evidence>", "questions": {...}}.',
       );
     }
 
     // Resolve the model against the cached catalog: this rejects an unknown or
     // unsuitable id before the request leaves, and never costs a round trip.
-    // Capability is judged from the request shape, so the default is the model
-    // that can actually answer it.
+    // Images are judged from the request shape, so the default is a model that
+    // can actually read them.
     const resolved = resolveSystemOneModel(request.model, {
-      fields: fields !== undefined,
       images: assets !== undefined,
     });
     const model = resolved.id;
@@ -1497,15 +1426,8 @@ export const systemOneTool: ToolDefinition<
       ...(request.state !== undefined
         ? { state: request.state as KenariSystemOneOptions["state"] }
         : {}),
-      ...(fields !== undefined
-        ? { fields: fields as KenariSystemOneOptions["fields"] }
-        : {
-            questions: request.questions as KenariSystemOneOptions["questions"],
-          }),
+      questions: request.questions as KenariSystemOneOptions["questions"],
       ...(assets !== undefined ? { assets } : {}),
-      ...(typeof request.reference_date === "string"
-        ? { reference_date: request.reference_date }
-        : {}),
     });
     const latencyMs = Date.now() - startedAt;
 

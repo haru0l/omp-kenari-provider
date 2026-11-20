@@ -70,37 +70,35 @@ describe("runSystemOne", () => {
     );
   });
 
-  it("passes Clairic fields, reference_date, and options through", async () => {
+  it("passes named questions and image assets through", async () => {
     const fetchMock = stubFetch({
-      model: "clairic:free",
-      answers: {
-        total: {
-          type: "number",
-          value: 4_250_000,
-          confidence: 0.99,
-          p_null: 0.0001,
-        },
-      },
-      truncated: false,
+      model: "clef:free",
+      answers: { total: { type: "noul", noul: 0.99 } },
       usage: { input_tokens: 20, output_tokens: 0 },
     });
 
     await runSystemOne({
       apiKey: "kn-test",
-      model: "clairic:free",
+      model: "clef:free",
       state: "Invoice INV-2291, issued 3 March 2026.",
-      fields: { total: { type: "number", instructions: "The total due" } },
-      reference_date: "2026-01-01",
-      options: { return_state_text: true },
+      questions: { total: { type: "noul", instructions: "Is a total due?" } },
+      assets: {
+        invoice: { format: "png", data_base64: "iVBORw0KGgo=" },
+      },
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const sent = JSON.parse(init.body as string);
-    expect(sent.fields).toEqual({
-      total: { type: "number", instructions: "The total due" },
+    expect(sent.questions).toEqual({
+      total: { type: "noul", instructions: "Is a total due?" },
     });
-    expect(sent.reference_date).toBe("2026-01-01");
-    expect(sent.options).toEqual({ return_state_text: true });
+    expect(sent.assets).toEqual({
+      invoice: { format: "png", data_base64: "iVBORw0KGgo=" },
+    });
+    // The removed Clairic-only fields must never reach the wire.
+    expect(sent).not.toHaveProperty("fields");
+    expect(sent).not.toHaveProperty("reference_date");
+    expect(sent).not.toHaveProperty("options");
     // the client-only apiKey must never reach the wire
     expect(sent).not.toHaveProperty("apiKey");
   });

@@ -2,8 +2,8 @@
  * Resolve the `model` argument of `system_one`.
  *
  * The tool takes a model id as a string, and the ids are not guessable:
- * `clef` and `clef:free` are different models at different prices, only one
- * model answers `fields`, and two of the strongest ones cannot read images.
+ * `clef` and `clef:free` are different models at different prices, and two of
+ * the strongest ones cannot read images.
  * A wrong pick is not a soft failure — kenari answers 400 — so this resolves
  * the id before the request leaves and explains every rejection in terms the
  * caller can act on.
@@ -20,8 +20,6 @@ import {
 
 /** What the request needs from the model that runs it. */
 export interface SystemOneModelNeed {
-  /** The request sends `fields` (Clairic) rather than `questions`. */
-  fields: boolean;
   /** The request sends images, so the model has to accept image input. */
   images: boolean;
 }
@@ -81,9 +79,6 @@ function fits(
   model: KenariSystemOneModelInfo,
   need: SystemOneModelNeed,
 ): boolean {
-  if (!model.capabilities.includes(need.fields ? "fields" : "questions")) {
-    return false;
-  }
   return !need.images || model.input.includes("image");
 }
 
@@ -144,13 +139,10 @@ export function nearestSystemOneModelIds(
 
 /**
  * Ids the default prefers, in order. `clef:free` is the house default and
- * `clef-flash:free` is its free sibling; a `fields` request has only Clairic.
- * A catalog that has moved or dropped these still falls through below.
+ * `clef-flash:free` is its free sibling. A catalog that has moved or dropped
+ * these still falls through below.
  */
-const PREFERRED_DEFAULTS: Record<"questions" | "fields", readonly string[]> = {
-  questions: ["clef:free", "clef-flash:free"],
-  fields: ["clairic:free"],
-};
+const PREFERRED_DEFAULTS: readonly string[] = ["clef:free", "clef-flash:free"];
 
 /**
  * The model a request runs on when it names none.
@@ -165,8 +157,7 @@ export function defaultSystemOneModel(
   need: SystemOneModelNeed,
   catalog: readonly KenariSystemOneModelInfo[] = getKenariSystemOneModelCatalog(),
 ): KenariSystemOneModelInfo {
-  const preferred = PREFERRED_DEFAULTS[need.fields ? "fields" : "questions"];
-  for (const id of preferred) {
+  for (const id of PREFERRED_DEFAULTS) {
     const exact = catalog.find((m) => m.id === id);
     if (exact && fits(exact, need)) return exact;
   }
@@ -182,7 +173,7 @@ export function defaultSystemOneModel(
   if (paid) return paid;
 
   throw new Error(
-    `system_one: no System One model in the catalog can answer this request (${need.fields ? "fields" : "questions"}${need.images ? ", with images" : ""}).`,
+    `system_one: no System One model in the catalog can answer this request${need.images ? " (needs image input)" : ""}.`,
   );
 }
 
@@ -192,18 +183,6 @@ function assertFits(
   need: SystemOneModelNeed,
   catalog: readonly KenariSystemOneModelInfo[],
 ): void {
-  if (need.fields && !info.capabilities.includes("fields")) {
-    throw new Error(
-      `system_one: model "${info.id}" answers questions, not fields extraction. Use "clairic:free" for fields, or send "questions" instead.`,
-    );
-  }
-
-  if (!need.fields && !info.capabilities.includes("questions")) {
-    throw new Error(
-      `system_one: model "${info.id}" extracts fields only and rejects questions. Use "${defaultSystemOneModel({ ...need, fields: false }, catalog).id}" for questions, or send "fields" instead.`,
-    );
-  }
-
   if (need.images && !info.input.includes("image")) {
     throw new Error(
       `system_one: model "${info.id}" takes text input only, so it cannot read images. Image-capable models: ${fittingIds(catalog, need).join(", ")}.`,

@@ -8,9 +8,9 @@
  * `probabilities: 0: 0.57` names no level at all, so the legend is rendered
  * inline next to its key rather than dropped.
  *
- * kenari answers more than the reference renderer covered — `box` regions and
- * Clairic `fields` extraction — so those get their own branches, with a compact
- * JSON fallback for any answer shape this build does not know yet.
+ * kenari answers more than the reference renderer covered — `box` regions — so
+ * those get their own branch, with a compact JSON fallback for any answer shape
+ * this build does not know yet.
  */
 
 // biome-ignore-all lint/suspicious/noExplicitAny: intentional dynamic boundary over JSON protocol values
@@ -73,17 +73,6 @@ function renderBoxes(answer: Record<string, any>): string[] {
   return lines;
 }
 
-/** Clairic extraction: a field answer carries `value`, or `values` for lists. */
-function renderField(answer: Record<string, any>): string[] {
-  if (Object.hasOwn(answer, "values")) {
-    return [`  values: ${JSON.stringify(answer.values)}`];
-  }
-  if (Object.hasOwn(answer, "value")) {
-    return [`  value: ${JSON.stringify(answer.value)}`];
-  }
-  return [`  ${JSON.stringify(answer)}`];
-}
-
 /** Any answer type this renderer does not know, kept readable but complete. */
 function renderUnknown(answer: unknown): string[] {
   if (!answer || typeof answer !== "object") return [`  ${String(answer)}`];
@@ -122,8 +111,6 @@ export function renderSystemOneResult(
       }
     } else if (a?.type === "box") {
       lines.push(`${id}:`, ...renderBoxes(a));
-    } else if (a?.type === "field" || a?.type === "fields") {
-      lines.push(`${id}:`, ...renderField(a));
     } else {
       lines.push(`${id}:`, ...renderUnknown(a));
     }
@@ -151,14 +138,14 @@ export function renderSystemOneResult(
  * Render the model catalog for `action: "models"`.
  *
  * The point of this output is the *decision*, not the inventory: which id to
- * send, and what it will cost. So the capabilities and the caveats that make a
- * wrong pick fail (fields needs Clairic; two strong models cannot read images)
- * are spelled out rather than left to be inferred from columns, and the two
- * defaults are named at the bottom where the reader lands last.
+ * send, and what it will cost. So the caveats that make a wrong pick fail (two
+ * strong models cannot read images) are spelled out rather than left to be
+ * inferred from columns, and the default is named at the bottom where the
+ * reader lands last.
  */
 export function renderSystemOneModelCatalog(
   models: KenariSystemOneModelInfo[],
-  defaults: { questions: string; fields: string },
+  defaultModel: string,
   source: "live" | "baseline",
 ): string {
   const lines = [
@@ -185,13 +172,12 @@ export function renderSystemOneModelCatalog(
     const id = model.id.padEnd(idWidth);
     const price = priceOf(model).padEnd(priceWidth);
     const input = model.input.join("+").padEnd(inputWidth);
-    const answers = model.capabilities.join("/");
-    lines.push(`  ${id}  ${price}${input}${answers}`);
+    lines.push(`  ${id}  ${price}${input}`.trimEnd());
   }
 
   lines.push(
     "",
-    `Defaults: ${defaults.questions} for questions, ${defaults.fields} for fields (omit "model" and the tool chooses by request shape).`,
+    `Default: ${defaultModel} (omit "model" and the tool chooses free-first).`,
   );
 
   // A paid input rate is the only figure here that costs money to ignore, so

@@ -13,9 +13,9 @@ kenari is an LLM gateway — one base URL (`https://kenari.id/v1`) speaks both t
 - **Embeddings** — `POST /v1/embeddings` (OpenAI Embeddings-compatible)
 - **Rerank** — `POST /v1/rerank` (Cohere-style relevance ranking)
 - **Moderations** — `POST /v1/moderations` (OpenAI Moderations-compatible)
-- **System One** — `POST /v1/systemone` for typed questions (noul, choice, score, box) and Clairic field extraction
+- **System One** — `POST /v1/systemone` for typed questions (noul, choice, score, box)
 - **System One as omp judge models** — every questions-capable System One model is registered as a native `kind: "judge"` model on omp's built-in `typesafe` api, so omp's `judge` role, `judge_batch` and jfind ranking can select a kenari model directly
-- **`system_one` tool + `system-one` skill** — the bundled skill routes decisions, image questions and field extraction to the tool, which defaults free-first (`clef:free`, then `clef-flash:free`, then any other free model; `clairic:free` for `fields`) and only spends on a paid model when no free one can answer. Lists the live catalog on `action: "models"`
+- **`system_one` tool + `system-one` skill** — the bundled skill routes decisions and image questions to the tool, which defaults free-first (`clef:free`, then `clef-flash:free`, then any other free model) and only spends on a paid model when no free one can answer. Lists the live catalog on `action: "models"`
 - **`generate_image` tool** — draws with kenari image models, renders the picture inline in the conversation, and saves the same bytes into the working directory
 - **Specialized model discovery** — `GET /v1/models?modality=` for `embedding`, `rerank`, `moderation` and `systemone` models
 - **Web search / fetch / X search** — `POST /v1/web/search`, `/v1/web/fetch` and `/v1/x/search`
@@ -99,15 +99,15 @@ System One models answer bounded questions about state you supply. They are not 
 
 Nothing in omp can `classify()` — that was pi's API. The judge role replaced it.
 
-**From chat** — the extension registers a `system_one` tool and ships the `system-one` skill that tells the model when to call it. The tool also reaches what the classifier interface cannot express: `box` questions (locate something in an image), Clairic `fields` extraction, audio/video state, and `reference_date` anchoring.
+**From chat** — the extension registers a `system_one` tool and ships the `system-one` skill that tells the model when to call it. The tool also reaches what the `typesafe` wire cannot express: `box` questions (locate something in an image) and audio/video state.
 
-**Choosing a model** — omit `model` and the tool picks free-first: `clef:free`, then `clef-flash:free`, then any other free model that fits (`clairic:free` for `fields`, an image-capable free model when `assets` are sent). A paid model is used only when no free model can answer, so the default never quietly bills you. An explicit `model` is always honored and priced. To see the live catalog with prices and capabilities:
+**Choosing a model** — omit `model` and the tool picks free-first: `clef:free`, then `clef-flash:free`, then any other free model that fits (an image-capable free model when `assets` are sent). A paid model is used only when no free model can answer, so the default never quietly bills you. An explicit `model` is always honored and priced. To see the live catalog with prices and input modalities:
 
 ```json
 { "action": "models" }
 ```
 
-That action is public, so it works before login, and it refreshes the cache model choice resolves against. An explicit `model` is validated offline against that cache: a provider prefix (`kenari/clef:free`), casing and the `jev` / `flash` / `omni` shorthands are normalized, an unknown id is rejected with the nearest real ids, and an id that cannot answer the request (fields on a questions model, an image on the text-only `clef` or `jev-1-13`) is rejected before the request leaves. Judgment calls never fetch the catalog — only `action: "models"` does.
+That action is public, so it works before login, and it refreshes the cache model choice resolves against. An explicit `model` is validated offline against that cache: a provider prefix (`kenari/clef:free`), casing and the `jev` / `flash` / `omni` shorthands are normalized, an unknown id is rejected with the nearest real ids, and an id that cannot answer the request (an image on the text-only `clef` or `jev-1-13`) is rejected before the request leaves. Judgment calls never fetch the catalog — only `action: "models"` does.
 
 
 ## API
@@ -167,9 +167,9 @@ Moderate content via `POST /v1/moderations`.
 
 ### `runSystemOne(options: KenariSystemOneOptions): Promise<KenariSystemOneResponse>`
 
-Ask typed questions or extract typed fields via `POST /v1/systemone` — kenari's own contract, which no OpenAI or Anthropic SDK method maps to. System One models are decision and extraction models, not chat models: call this endpoint with a chat id, or a chat endpoint with a System One id, and kenari returns 400. Discover the ids with `fetchKenariModelsByModality("systemone")`.
+Ask typed questions via `POST /v1/systemone` — kenari's own contract, which no OpenAI or Anthropic SDK method maps to. System One models are decision models, not chat models: call this endpoint with a chat id, or a chat endpoint with a System One id, and kenari returns 400. Discover the ids with `fetchKenariModelsByModality("systemone")`.
 
-`questions` runs noul, choice, score and box questions (up to 128); `fields` runs Clairic extraction (up to 64) — send one or the other, not both. An object or array `state` is sent as its JSON text.
+`questions` runs noul, choice, score and box questions (up to 128). An object or array `state` is sent as its JSON text.
 
 ```ts
 const { answers } = await runSystemOne({
@@ -181,27 +181,15 @@ const { answers } = await runSystemOne({
   },
 });
 // answers.pick -> { type: "choice", choice: "cat", confidence: 0.98, probabilities: {...} }
-
-const invoice = await runSystemOne({
-  apiKey,
-  model: "clairic:free",
-  state: "Invoice INV-2291, issued 3 March 2026. Total due: Rp 4,250,000.",
-  fields: {
-    total: { type: "number", instructions: "The total due in rupiah" },
-    issued: { type: "date", instructions: "The issue date" },
-  },
-});
-// invoice.answers.total.value -> 4250000
 ```
 
-Answers carry `confidence`; Clairic fields also carry `guess`, `p_null` and, for text, the `span` of the guess in the read text. Use `reference_date` to anchor dates written without a year, and `options.return_state_text` to get back the text the spans refer to.
-`choice` and `score` answers carry `confidence`; a `noul` answer carries only its probability (`noul`), which is its uncertainty measure. `score` is fractional — 1.67 sits between two `legend` labels. Clairic fields also carry `guess`, `p_null` and, for text, the `span` of the guess in the read text. Use `reference_date` to anchor dates written without a year, and `options.return_state_text` to get back the text the spans refer to.
+`choice` and `score` answers carry `confidence`; a `noul` answer carries only its probability (`noul`), which is its uncertainty measure. `score` is fractional — 1.67 sits between two `legend` labels.
 
 ### System One judge models
 
 `getKenariSystemOneBaselineModels()` returns the six questions-capable System One models, and `fetchKenariSystemOneDynamicModels(apiKey)` fetches them live from `GET /v1/models?modality=systemone`. `toProviderJudgeConfigs()` turns either list into the `api: "typesafe"`, `kind: "judge"` entries the provider registers, so they are selectable through omp's `judge` role and never appear in `/model`.
 
-Every judge entry carries the origin base URL (`https://kenari.id`, no `/v1`) because omp's `typesafe` wire appends `/v1/systemone` itself. `clairic:free` is deliberately excluded: it answers `fields` extraction and rejects `questions`, which the `typesafe` wire cannot express. Use the `system_one` tool for it, and for `box` questions, audio/video state and `reference_date`. It stays visible in the `action: "models"` catalog, which is for choosing rather than judging.
+Every judge entry carries the origin base URL (`https://kenari.id`, no `/v1`) because omp's `typesafe` wire appends `/v1/systemone` itself. `clairic:free` is filtered out of both the judge list and the model-choice catalog: it answers `fields` extraction and rejects `questions`, which the `typesafe` wire only ever sends. For `box` questions and audio/video state use the `system_one` tool.
 
 `getKenariSystemOneInputRate(id)` gives the USD input rate omp uses for cost accounting; a judge bills input tokens only.
 

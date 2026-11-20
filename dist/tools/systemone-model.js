@@ -2,8 +2,8 @@
  * Resolve the `model` argument of `system_one`.
  *
  * The tool takes a model id as a string, and the ids are not guessable:
- * `clef` and `clef:free` are different models at different prices, only one
- * model answers `fields`, and two of the strongest ones cannot read images.
+ * `clef` and `clef:free` are different models at different prices, and two of
+ * the strongest ones cannot read images.
  * A wrong pick is not a soft failure — kenari answers 400 — so this resolves
  * the id before the request leaves and explains every rejection in terms the
  * caller can act on.
@@ -50,9 +50,6 @@ export function findSystemOneModelInfo(raw, catalog) {
 }
 /** Can this model answer the request as specified? */
 function fits(model, need) {
-    if (!model.capabilities.includes(need.fields ? "fields" : "questions")) {
-        return false;
-    }
     return !need.images || model.input.includes("image");
 }
 /** Ids that can answer this request, for an error that offers a way out. */
@@ -97,13 +94,10 @@ export function nearestSystemOneModelIds(raw, catalog, limit = 3) {
 }
 /**
  * Ids the default prefers, in order. `clef:free` is the house default and
- * `clef-flash:free` is its free sibling; a `fields` request has only Clairic.
- * A catalog that has moved or dropped these still falls through below.
+ * `clef-flash:free` is its free sibling. A catalog that has moved or dropped
+ * these still falls through below.
  */
-const PREFERRED_DEFAULTS = {
-    questions: ["clef:free", "clef-flash:free"],
-    fields: ["clairic:free"],
-};
+const PREFERRED_DEFAULTS = ["clef:free", "clef-flash:free"];
 /**
  * The model a request runs on when it names none.
  *
@@ -114,8 +108,7 @@ const PREFERRED_DEFAULTS = {
  * request shape at all.
  */
 export function defaultSystemOneModel(need, catalog = getKenariSystemOneModelCatalog()) {
-    const preferred = PREFERRED_DEFAULTS[need.fields ? "fields" : "questions"];
-    for (const id of preferred) {
+    for (const id of PREFERRED_DEFAULTS) {
         const exact = catalog.find((m) => m.id === id);
         if (exact && fits(exact, need))
             return exact;
@@ -130,16 +123,10 @@ export function defaultSystemOneModel(need, catalog = getKenariSystemOneModelCat
     const paid = catalog.find((m) => fits(m, need));
     if (paid)
         return paid;
-    throw new Error(`system_one: no System One model in the catalog can answer this request (${need.fields ? "fields" : "questions"}${need.images ? ", with images" : ""}).`);
+    throw new Error(`system_one: no System One model in the catalog can answer this request${need.images ? " (needs image input)" : ""}.`);
 }
 /** Reject a model that exists but cannot answer what was asked of it. */
 function assertFits(info, need, catalog) {
-    if (need.fields && !info.capabilities.includes("fields")) {
-        throw new Error(`system_one: model "${info.id}" answers questions, not fields extraction. Use "clairic:free" for fields, or send "questions" instead.`);
-    }
-    if (!need.fields && !info.capabilities.includes("questions")) {
-        throw new Error(`system_one: model "${info.id}" extracts fields only and rejects questions. Use "${defaultSystemOneModel({ ...need, fields: false }, catalog).id}" for questions, or send "fields" instead.`);
-    }
     if (need.images && !info.input.includes("image")) {
         throw new Error(`system_one: model "${info.id}" takes text input only, so it cannot read images. Image-capable models: ${fittingIds(catalog, need).join(", ")}.`);
     }

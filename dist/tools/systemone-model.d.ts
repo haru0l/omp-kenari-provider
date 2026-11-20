@@ -2,8 +2,8 @@
  * Resolve the `model` argument of `system_one`.
  *
  * The tool takes a model id as a string, and the ids are not guessable:
- * `clef` and `clef:free` are different models at different prices, only one
- * model answers `fields`, and two of the strongest ones cannot read images.
+ * `clef` and `clef:free` are different models at different prices, and two of
+ * the strongest ones cannot read images.
  * A wrong pick is not a soft failure — kenari answers 400 — so this resolves
  * the id before the request leaves and explains every rejection in terms the
  * caller can act on.
@@ -15,8 +15,6 @@
 import { type KenariSystemOneModelInfo } from "../systemone.js";
 /** What the request needs from the model that runs it. */
 export interface SystemOneModelNeed {
-    /** The request sends `fields` (Clairic) rather than `questions`. */
-    fields: boolean;
     /** The request sends images, so the model has to accept image input. */
     images: boolean;
 }

@@ -68,7 +68,7 @@ describe("System One judge models", () => {
     expect(model?.cost.cacheRead).toBe(0);
   });
 
-  it("drops Clairic, which answers fields extraction and rejects questions", () => {
+  it("drops Clairic: a judge sends questions, which it rejects", () => {
     expect(toKenariSystemOneModel(apiModel({ id: "clairic:free" }))).toBeNull();
     const models = toKenariSystemOneModels([
       apiModel({ id: "clairic:free" }),
@@ -131,19 +131,30 @@ describe("System One judge models", () => {
 });
 
 describe("system_one argument normalization", () => {
-  it("carries model, fields, assets and reference_date through untouched", () => {
+  it("carries model and assets through untouched, dropping junk", () => {
     const args = prepareSystemOneArgs({
       model: "jev-1-14",
-      fields: { total: { type: "number" } },
       assets: { receipt: { path: "./receipt.png" } },
-      reference_date: "2024-05-01",
       junk: "dropped",
     }) as Record<string, unknown>;
     expect(args.model).toBe("jev-1-14");
-    expect(args.fields).toEqual({ total: { type: "number" } });
     expect(args.assets).toEqual({ receipt: { path: "./receipt.png" } });
-    expect(args.reference_date).toBe("2024-05-01");
     expect(args.junk).toBeUndefined();
+  });
+
+  it("drops the removed Clairic-only keys", () => {
+    // `fields`, `reference_date` and `options` are gone; a caller still sending
+    // them must not have them forwarded to a questions-only endpoint.
+    const args = prepareSystemOneArgs({
+      state: "x",
+      questions: { q: { type: "noul", instructions: "?" } },
+      fields: { total: { type: "number" } },
+      reference_date: "2024-05-01",
+      options: { return_state_text: true },
+    }) as Record<string, unknown>;
+    expect(args.fields).toBeUndefined();
+    expect(args.reference_date).toBeUndefined();
+    expect(args.options).toBeUndefined();
   });
 
   it("carries the models action through normalization", () => {
@@ -226,61 +237,6 @@ describe("system_one tool", () => {
     expect(result.details?.usage?.cost.total).toBeCloseTo(850 / 16_500, 10);
   });
 
-  it("sends Clairic fields instead of questions", async () => {
-    const fetchMock = stubFetch({
-      model: "clairic:free",
-      answers: { total: { type: "field", value: 42_000 } },
-      usage: { input_tokens: 10, output_tokens: 0 },
-    });
-
-    await systemOneTool.execute(
-      "call-2",
-      {
-        model: "clairic:free",
-        state: "total: 42.000",
-        fields: { total: { type: "number", unit: "IDR" } },
-        reference_date: "2024-05-01",
-      } as never,
-      undefined,
-      undefined,
-      context() as never,
-    );
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(String(init.body));
-    expect(body.fields).toEqual({ total: { type: "number", unit: "IDR" } });
-    expect(body.questions).toBeUndefined();
-    expect(body.reference_date).toBe("2024-05-01");
-  });
-
-  it("rejects a request that sends both questions and fields", async () => {
-    await expect(
-      systemOneTool.execute(
-        "call-3",
-        {
-          state: "x",
-          questions: { q: { type: "noul", instructions: "?" } },
-          fields: { total: { type: "number" } },
-        } as never,
-        undefined,
-        undefined,
-        context() as never,
-      ),
-    ).rejects.toThrow(/either "questions" or "fields"/);
-  });
-
-  it("names the unknown field type", async () => {
-    await expect(
-      systemOneTool.execute(
-        "call-4",
-        { state: "x", fields: { total: { type: "money" } } } as never,
-        undefined,
-        undefined,
-        context() as never,
-      ),
-    ).rejects.toThrow(/"total" has unknown type "money"/);
-  });
-
   it("requires state when no image is sent", async () => {
     await expect(
       systemOneTool.execute(
@@ -317,12 +273,17 @@ describe("system_one model choice", () => {
 
   const catalog = KENARI_SYSTEMONE_MODEL_INFO;
 
-  it("lists Clairic as the only fields model", () => {
-    const clairic = catalog.find((m) => m.id === "clairic:free");
-    expect(clairic?.capabilities).toEqual(["fields"]);
-    expect(
-      catalog.filter((m) => m.capabilities.includes("questions")).length,
-    ).toBe(6);
+  it("lists every baseline model once, with no fields-only entry", () => {
+    expect(catalog.map((m) => m.id)).toEqual([
+      "clef:free",
+      "clef",
+      "clef-flash:free",
+      "clef-omni:free",
+      "jev-1-13",
+      "jev-1-14",
+    ]);
+    // Clairic was the only fields model kenari had, and it is gone.
+    expect(catalog.some((m) => m.id.startsWith("clairic"))).toBe(false);
   });
 
   it("resolves a provider-qualified id and a case variant", () => {
@@ -356,29 +317,17 @@ describe("system_one model choice", () => {
     );
   });
 
-  it("rejects fields on a questions model, naming the fields model", () => {
-    expect(() =>
-      resolveSystemOneModel("clef:free", { fields: true, images: false }),
-    ).toThrow(/answers questions, not fields extraction.*clairic:free/);
-  });
-
-  it("rejects questions on Clairic, naming a questions default", () => {
-    expect(() => resolveSystemOneModel("clairic:free", need())).toThrow(
-      /extracts fields only.*clef:free/,
-    );
-  });
-
   it("rejects an image on a text-only model, listing what can read it", () => {
     expect(() =>
-      resolveSystemOneModel("clef", { fields: false, images: true }),
+      resolveSystemOneModel("clef", { images: true }),
     ).toThrow(/takes text input only.*clef:free/);
   });
 
-  it("defaults to Clairic for fields and Clef for questions", () => {
-    expect(
-      resolveSystemOneModel(undefined, { fields: true, images: false }).id,
-    ).toBe("clairic:free");
+  it("defaults to Clef", () => {
     expect(resolveSystemOneModel(undefined, need()).id).toBe("clef:free");
+    expect(resolveSystemOneModel(undefined, { images: false }).id).toBe(
+      "clef:free",
+    );
   });
 
   it("falls back to clef-flash:free when clef:free is not in the catalog", () => {
@@ -420,7 +369,7 @@ describe("system_one model choice", () => {
     const withoutClefFree = catalog.filter((m) => m.id !== "clef:free");
     const resolved = resolveSystemOneModel(
       undefined,
-      { fields: false, images: true },
+      { images: true },
       withoutClefFree,
     );
     expect(resolved.info.isFree).toBe(true);
@@ -428,17 +377,14 @@ describe("system_one model choice", () => {
   });
 
   it("defaults an image request to an image-capable model", () => {
-    const resolved = resolveSystemOneModel(undefined, {
-      fields: false,
-      images: true,
-    });
+    const resolved = resolveSystemOneModel(undefined, { images: true });
     expect(resolved.info.input).toContain("image");
   });
 });
 
-/** A plain questions request: no fields, no images. */
-function need(): { fields: boolean; images: boolean } {
-  return { fields: false, images: false };
+/** A plain questions request: no images. */
+function need(): { images: boolean } {
+  return { images: false };
 }
 
 describe("system_one action: models", () => {
@@ -509,16 +455,9 @@ describe("system_one action: models", () => {
     expect(String(url)).toContain("/models?modality=systemone");
 
     const details = result.details as { models: { id: string }[] };
-    expect(details.models.map((m) => m.id)).toEqual([
-      "clef:free",
-      "clef",
-      "clairic:free",
-    ]);
-    // Clairic is listed as a fields model, not dropped.
-    const clairic = (
-      result.details as { models: { id: string; capabilities: string[] }[] }
-    ).models.find((m) => m.id === "clairic:free");
-    expect(clairic?.capabilities).toEqual(["fields"]);
+    // The live catalog still carries clairic:free, but nothing in this build
+    // can use it, so it is not offered for model choice.
+    expect(details.models.map((m) => m.id)).toEqual(["clef:free", "clef"]);
 
     expect(result.content[0]).toMatchObject({ type: "text" });
     expect(result.details?.usage?.cost.total).toBe(0);
@@ -537,7 +476,7 @@ describe("system_one action: models", () => {
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("clef:free");
     expect(text).toContain("3,000 IDR/1M in");
-    expect(text).toContain("Defaults: clef:free for questions, clairic:free");
+    expect(text).toContain("Default: clef:free");
   });
 
   it("falls back to the static catalog when the fetch fails", async () => {
@@ -580,10 +519,7 @@ describe("system_one action: models", () => {
 
     // Model resolution now runs against the cached catalog: an id only the
     // live catalog has must resolve without another fetch.
-    const resolved = resolveSystemOneModel("clef", {
-      fields: false,
-      images: false,
-    });
+    const resolved = resolveSystemOneModel("clef", { images: false });
     expect(resolved.id).toBe("clef");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
