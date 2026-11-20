@@ -1,14 +1,13 @@
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-declare const generateImageParams: Type.TObject<{
-    prompt: Type.TString;
-    model: Type.TOptional<Type.TString>;
-    n: Type.TOptional<Type.TInteger>;
-    size: Type.TOptional<Type.TString>;
-    quality: Type.TOptional<Type.TUnion<[Type.TLiteral<"standard">, Type.TLiteral<"hd">]>>;
-    style: Type.TOptional<Type.TUnion<[Type.TLiteral<"natural">, Type.TLiteral<"vivid">]>>;
-    background: Type.TOptional<Type.TUnion<[Type.TLiteral<"opaque">, Type.TLiteral<"auto">]>>;
-    output: Type.TOptional<Type.TString>;
+import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+declare const generateImageParams: import("@oh-my-pi/omptype/typebox").TObject<{
+    readonly prompt: import("@oh-my-pi/omptype/typebox").TString;
+    readonly model: import("@oh-my-pi/omptype/typebox").TOptional<import("@oh-my-pi/omptype/typebox").TString>;
+    readonly n: import("@oh-my-pi/omptype/typebox").TOptional<import("@oh-my-pi/omptype/typebox").TNumber>;
+    readonly size: import("@oh-my-pi/omptype/typebox").TOptional<import("@oh-my-pi/omptype/typebox").TString>;
+    readonly quality: import("@oh-my-pi/omptype/typebox").TOptional<import("@oh-my-pi/omptype/typebox").TUnion<readonly [import("@oh-my-pi/omptype/typebox").TLiteral<"standard">, import("@oh-my-pi/omptype/typebox").TLiteral<"hd">]>>;
+    readonly style: import("@oh-my-pi/omptype/typebox").TOptional<import("@oh-my-pi/omptype/typebox").TUnion<readonly [import("@oh-my-pi/omptype/typebox").TLiteral<"natural">, import("@oh-my-pi/omptype/typebox").TLiteral<"vivid">]>>;
+    readonly background: import("@oh-my-pi/omptype/typebox").TOptional<import("@oh-my-pi/omptype/typebox").TUnion<readonly [import("@oh-my-pi/omptype/typebox").TLiteral<"opaque">, import("@oh-my-pi/omptype/typebox").TLiteral<"auto">]>>;
+    readonly output: import("@oh-my-pi/omptype/typebox").TOptional<import("@oh-my-pi/omptype/typebox").TString>;
 }>;
 export interface GenerateImageDetails {
     model: string;

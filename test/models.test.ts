@@ -68,15 +68,31 @@ describe("toKenariModel", () => {
     expect(model.cost.input).toBeGreaterThan(0);
   });
 
-  it("maps reasoning_options to a thinking level map clamped to the model's options", () => {
+  it("maps reasoning_options to an omp ThinkingConfig clamped to the model's options", () => {
     const model = toKenariModel({
       ...sample,
       reasoning_options: ["low", "medium", "high"],
     })!;
-    expect(model.thinkingLevelMap?.off).toBe("none");
-    expect(model.thinkingLevelMap?.medium).toBe("medium");
-    expect(model.thinkingLevelMap?.max).toBe("high"); // clamped down
-    expect(model.thinkingLevelMap?.minimal).toBe("low");
+
+    // omp replaced pi's `thinkingLevelMap` with a ThinkingConfig: an ordered
+    // `efforts` list plus an `effortMap` from each user-facing effort to the
+    // wire value. Only supported rungs are advertised.
+    expect(model.thinking?.mode).toBe("effort");
+    expect(model.thinking?.efforts).toEqual(["low", "medium", "high"]);
+
+    expect(model.thinking?.effortMap?.medium).toBe("medium");
+    expect(model.thinking?.effortMap?.max).toBe("high"); // clamped down
+    expect(model.thinking?.effortMap?.minimal).toBe("low"); // no minimal rung
+    expect(model.thinking?.effortMap?.xhigh).toBe("high"); // clamped down
+  });
+
+  it("omits the thinking config when no reasoning option is supported", () => {
+    const model = toKenariModel({
+      ...sample,
+      reasoning_options: ["turbo"],
+    })!;
+    // Advertising an empty effort surface would be worse than none at all.
+    expect(model.thinking).toBeUndefined();
   });
 
   it("marks :free variants and pricing.free as free", () => {

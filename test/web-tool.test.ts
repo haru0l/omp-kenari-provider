@@ -61,10 +61,10 @@ describe("kenari_web_search tool", () => {
     expect(text).toContain("(untitled)");
     expect(text).not.toContain("undefined");
 
-    expect(result.details.query).toBe("Kuala Lumpur weather today");
-    expect(result.details.results).toHaveLength(2);
-    expect(result.details.costMicroIdr).toBe(250);
-    expect(result.details.requestId).toBe("req-1");
+    expect(result.details?.query).toBe("Kuala Lumpur weather today");
+    expect(result.details?.results).toHaveLength(2);
+    expect(result.details?.costMicroIdr).toBe(250);
+    expect(result.details?.requestId).toBe("req-1");
   });
 
   it("forwards max_results when given and omits it otherwise", async () => {
@@ -113,7 +113,7 @@ describe("kenari_web_search tool", () => {
     expect((result.content[0] as { text: string }).text).toContain(
       'No results for "nothing at all".',
     );
-    expect(result.details.results).toEqual([]);
+    expect(result.details?.results).toEqual([]);
   });
 
   it("rejects an empty query before calling the API", async () => {

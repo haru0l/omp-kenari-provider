@@ -2,10 +2,10 @@
  * Model catalog for kenari.
  *
  * kenari's catalog is dynamic — GET /v1/models (public) lists chat models with
- * prices and capabilities. We fetch it at refresh time and merge with a static
+ * prices and capabilities. We fetch it at discovery time and merge with a static
  * baseline for offline initialization. See llms-full.txt ("Models and pricing").
  *
- * Prices arrive as micro-Rupiah per 1M tokens and are converted to pi's
+ * Prices arrive as micro-Rupiah per 1M tokens and are converted to omp's
  * USD-per-1M-token ModelCost. One model can have a paid id and a `:free`
  * variant; both are listed by the API and both are surfaced here.
  */
@@ -19,7 +19,14 @@ const ZERO_COST = Object.freeze({
     cacheRead: 0,
     cacheWrite: 0,
 });
-/** Shared compat: kenari documents `max_tokens` (not max_completion_tokens) and no `store` field. */
+/**
+ * Shared OpenAI-compat overrides for kenari.
+ *
+ * kenari documents `max_tokens` (not `max_completion_tokens`) and its chat
+ * completions endpoint has no `store` field, but it does accept
+ * `reasoning_effort`. Typed against omp's compat bag so a renamed or removed
+ * key fails the build instead of being silently ignored on the wire.
+ */
 const KENARI_COMPAT = Object.freeze({
     supportsStore: false,
     maxTokensField: "max_tokens",
@@ -135,15 +142,37 @@ export function microIdrCost(pricing) {
         cacheWrite: rate(pricing.cache_write ?? pricing.input),
     };
 }
-/** Map pi thinking levels onto the model's supported kenari reasoning_options. */
-function toThinkingLevelMap(options) {
+/**
+ * Map kenari's `reasoning_options` onto omp's {@link ThinkingConfig}.
+ *
+ * kenari reports the efforts a model accepts as plain strings in a fixed
+ * ladder. omp wants an ordered `efforts` list plus an `effortMap` from each
+ * user-facing effort to the wire value, and it drops the model's thinking
+ * surface entirely when the list would be empty — so an unknown option set
+ * returns `undefined` rather than a config that advertises nothing.
+ *
+ * `minimal` is clamped to the lowest effort the model actually supports, since
+ * kenari has no separate minimal rung.
+ */
+function toThinkingConfig(options) {
     if (!options || options.length === 0)
         return undefined;
-    const ladder = ["low", "medium", "high", "xhigh", "max"];
+    // omp's `Effort` is a const enum over exactly these wire strings. Declaring
+    // the ladder as `Effort[]` keeps `efforts` correctly typed without turning the
+    // runtime strings into enum member access (the enum erases at compile time and
+    // would break under `isolatedModules`).
+    const ladder = [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ];
     const supported = ladder.filter((l) => options.includes(l));
     if (supported.length === 0)
         return undefined;
     const lowest = supported[0];
+    /** Highest supported rung at or below `level`, else the lowest rung. */
     const clamp = (level) => {
         const rank = ladder.indexOf(level);
         if (rank === -1)
@@ -155,20 +184,19 @@ function toThinkingLevelMap(options) {
         }
         return lowest;
     };
-    const map = {
-        off: "none", // kenari translates reasoning_effort "none" to the backend's native off
+    const effortMap = {
+        // kenari translates reasoning_effort "none" to the backend's native off.
+        minimal: clamp("minimal"),
     };
-    for (const level of [
-        "minimal",
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "max",
-    ]) {
-        map[level] = clamp(level);
+    for (const level of ladder) {
+        effortMap[level] = clamp(level);
     }
-    return map;
+    return {
+        // kenari takes the effort as `reasoning_effort` on an OpenAI-compatible body.
+        mode: "effort",
+        efforts: supported,
+        effortMap,
+    };
 }
 /** Convert a kenari API model to a pi-ai Model. */
 export function toKenariModel(apiModel) {
@@ -186,7 +214,7 @@ export function toKenariModel(apiModel) {
         baseUrl: BASE_URL_KENARI,
         reasoning,
         ...(reasoning && {
-            thinkingLevelMap: toThinkingLevelMap(apiModel.reasoning_options),
+            thinking: toThinkingConfig(apiModel.reasoning_options),
         }),
         input: inputs.includes("image")
             ? ["text", "image"]
@@ -218,35 +246,32 @@ export function toKenariModels(apiModels) {
     return models;
 }
 // =============================================================================
-// Model refresh (called by pi on session start / /refresh)
+// Model discovery (called by omp via `fetchDynamicModels`)
 // =============================================================================
-/** Refresh the model catalog. Called by pi's model refresh lifecycle. */
-export async function refreshKenariModels(context) {
-    // Offline init: restore from store, no network.
-    if (!context.allowNetwork) {
-        const stored = context.stored?.models;
-        return stored ?? KENARI_BASELINE_MODELS;
-    }
-    // Online: fetch the public catalog.
+/**
+ * Discover the chat catalog for omp's `fetchDynamicModels` hook.
+ *
+ * omp calls this with the resolved API key and caches the result in its SQLite
+ * model store, so there is no `RefreshModelsContext` to thread through: no
+ * `allowNetwork` flag, no `stored` snapshot, no `publish` callback. The key is
+ * unused — kenari's catalog endpoint is public — but the signature is fixed by
+ * the contract.
+ *
+ * Failures never throw: an unreachable catalog degrades to the static baseline,
+ * so an offline start still has working models.
+ */
+export async function fetchKenariDynamicModels(_apiKey) {
     try {
-        const apiModels = await fetchKenariModels(context.signal);
+        const apiModels = await fetchKenariModels();
         const models = toKenariModels(apiModels);
         // The built-in route is not a catalog model; keep it available.
         if (!models.some((m) => m.id === KENARI_FREE_ROUTE_MODEL.id)) {
             models.unshift(KENARI_FREE_ROUTE_MODEL);
         }
-        // Publish to pi's model store if available.
-        if (context.publish && models.length > 0) {
-            await context.publish({
-                persist: { models, checkedAt: Date.now() },
-            });
-        }
         return models.length > 0 ? models : KENARI_BASELINE_MODELS;
     }
     catch {
-        // On fetch failure, fall back to stored or baseline.
-        const stored = context.stored?.models;
-        return stored ?? KENARI_BASELINE_MODELS;
+        return KENARI_BASELINE_MODELS;
     }
 }
 /** Get the baseline models for offline init. */

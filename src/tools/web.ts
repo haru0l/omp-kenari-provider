@@ -11,8 +11,8 @@
  * `generate_image`: the key stored by `/login kenari` is the same one the chat
  * models use, so there is no separate secret to configure.
  */
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import { Type } from "@oh-my-pi/omptype/typebox";
 import { withDeadline } from "../api/http.js";
 import { webSearch } from "../api/web.js";
 import { PROVIDER_KENARI } from "../constants.js";
@@ -43,16 +43,6 @@ export interface KenariWebSearchDetails {
   requestId?: string;
 }
 
-const kenariWebSearchOutput = Type.Object({
-  query: Type.String(),
-  results: Type.Array(
-    Type.Object({
-      title: Type.String(),
-      url: Type.String(),
-      content: Type.String(),
-    }),
-  ),
-});
 
 /** One numbered block per result: title, url, then the snippet. */
 function renderResults(results: KenariWebSearchResult[]): string {
@@ -85,21 +75,11 @@ export const kenariWebSearchTool: ToolDefinition<
     "Search the live web through kenari's web search endpoint and return ranked results with titles, URLs and snippets. " +
     "Use it when the answer depends on current information the model cannot know: news, prices, weather, releases, documentation that may have changed. " +
     "It returns snippets, not full pages — search first, then fetch a promising URL when the snippet is not enough. " +
-    "Pass the query the way a search engine wants it: concrete terms, not a sentence explaining what you want.",
+    "Pass the query the way a search engine wants it: concrete terms (place names, dates, versions), not a sentence explaining what you want. " +
+    "Do not repeat the same query hoping for a different answer; refine the terms instead. " +
+    "Cite the URLs you actually used, and say which claims came from the search rather than from the model's own knowledge.",
 
   parameters: kenariWebSearchParams,
-  outputSchema: kenariWebSearchOutput,
-
-  promptSnippet:
-    "Use kenari_web_search to look things up on the live web through kenari; it returns ranked results with URLs and snippets",
-
-  promptGuidelines: [
-    "When the user asks for current information (news, weather, prices, releases, anything after your training data), call kenari_web_search instead of answering from memory.",
-    "Search with concrete query terms — place names, dates, versions — rather than a sentence describing the question.",
-    "The results are snippets. When a snippet is inconclusive, fetch the most promising URL before drawing a conclusion.",
-    "Cite the URLs you actually used, and say which claims came from the search rather than from the model's own knowledge.",
-    "Do not repeat the same query hoping for a different answer; refine the terms instead.",
-  ],
 
   async execute(_toolCallId, params, signal, _onUpdate, ctx) {
     const query = params.query.trim();

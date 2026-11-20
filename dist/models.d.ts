@@ -2,14 +2,14 @@
  * Model catalog for kenari.
  *
  * kenari's catalog is dynamic — GET /v1/models (public) lists chat models with
- * prices and capabilities. We fetch it at refresh time and merge with a static
+ * prices and capabilities. We fetch it at discovery time and merge with a static
  * baseline for offline initialization. See llms-full.txt ("Models and pricing").
  *
- * Prices arrive as micro-Rupiah per 1M tokens and are converted to pi's
+ * Prices arrive as micro-Rupiah per 1M tokens and are converted to omp's
  * USD-per-1M-token ModelCost. One model can have a paid id and a `:free`
  * variant; both are listed by the API and both are surfaced here.
  */
-import type { Api, Model, RefreshModelsContext } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@oh-my-pi/pi-ai";
 import type { KenariApiModel, KenariModality, KenariModel, KenariOpenAIModel } from "./types.js";
 /**
  * The built-in kenari-free route: exists on every account, points at free
@@ -42,8 +42,19 @@ export declare function microIdrCost(pricing: {
 export declare function toKenariModel(apiModel: KenariApiModel): KenariModel | null;
 /** Convert a catalog of kenari API models to pi-ai Models. */
 export declare function toKenariModels(apiModels: KenariApiModel[]): KenariModel[];
-/** Refresh the model catalog. Called by pi's model refresh lifecycle. */
-export declare function refreshKenariModels(context: RefreshModelsContext): Promise<KenariModel[]>;
+/**
+ * Discover the chat catalog for omp's `fetchDynamicModels` hook.
+ *
+ * omp calls this with the resolved API key and caches the result in its SQLite
+ * model store, so there is no `RefreshModelsContext` to thread through: no
+ * `allowNetwork` flag, no `stored` snapshot, no `publish` callback. The key is
+ * unused — kenari's catalog endpoint is public — but the signature is fixed by
+ * the contract.
+ *
+ * Failures never throw: an unreachable catalog degrades to the static baseline,
+ * so an offline start still has working models.
+ */
+export declare function fetchKenariDynamicModels(_apiKey: string | undefined): Promise<KenariModel[]>;
 /** Get the baseline models for offline init. */
 export declare function getKenariBaselineModels(): KenariModel[];
 //# sourceMappingURL=models.d.ts.map

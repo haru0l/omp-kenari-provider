@@ -2,61 +2,120 @@ import { describe, expect, it } from "vitest";
 import register from "../src/index.js";
 
 /**
- * The extension registers classifier *models* and the classifier *transport*.
- * pi only attaches `provider.classify` when the config carries a `classifiers`
- * map, so a model without a matching implementation is silently unusable from
- * `models.classify()` — this test pins the pair together.
+ * Provider registration under omp's contract.
+ *
+ * Two things replaced pi's classifier machinery and are pinned here because
+ * both fail silently rather than loudly:
+ *
+ *  1. omp has no `classifiers` map. System One models are registered as
+ *     `kind: "judge"` models on the built-in `typesafe` api, which is what
+ *     routes them into the judge role.
+ *  2. The `typesafe` wire targets `{baseUrl}/v1/systemone`, while every other
+ *     kenari surface lives under `/v1`. So judge models must carry the bare
+ *     origin and chat models the `/v1` base — a single provider-level base
+ *     cannot serve both.
  */
 describe("provider registration", () => {
+  interface CapturedModel {
+    id: string;
+    api?: string;
+    kind?: string;
+    baseUrl?: string;
+    input: string[];
+    cost: { input: number };
+    contextWindow: number;
+    maxTokens: number;
+  }
+
+  interface CapturedConfig {
+    baseUrl?: string;
+    api?: string;
+    apiKey?: string;
+    authHeader?: boolean;
+    models: CapturedModel[];
+    oauth?: unknown;
+    fetchDynamicModels?: (apiKey: string | undefined) => Promise<unknown>;
+    classifiers?: unknown;
+    streamSimple?: unknown;
+  }
+
   function capture() {
-    const providers: { id: string; config: Record<string, never> }[] = [];
+    const providers: { id: string; config: CapturedConfig }[] = [];
     const tools: string[] = [];
-    const pi = {
+    const omp = {
       registerProvider: (id: string, config: unknown) => {
-        providers.push({ id, config: config as Record<string, never> });
+        providers.push({ id, config: config as CapturedConfig });
       },
       registerTool: (tool: { name: string }) => {
         tools.push(tool.name);
       },
       on: () => {},
     };
-    register(pi as never);
+    register(omp as never);
     return { providers, tools };
   }
 
-  it("registers the System One classifier transport alongside its models", () => {
+  it("registers System One models as judge models on the typesafe api", () => {
     const { providers } = capture();
     const [provider] = providers;
-    const config = provider?.config as unknown as {
-      models: { type?: string; api?: string }[];
-      classifiers?: Record<string, { classify: unknown }>;
-    };
 
     expect(provider?.id).toBe("kenari");
-    expect(config.classifiers?.["typesafe-system-one"]?.classify).toBeTypeOf(
-      "function",
-    );
 
-    // Every classifier model's api must have an implementation, or pi leaves
-    // provider.classify undefined and classification fails at call time.
-    const classifierApis = new Set(
-      config.models
-        .filter((model) => model.type === "classifier")
-        .map((model) => model.api),
+    const judgeModels = provider?.config.models.filter(
+      (model) => model.kind === "judge",
     );
-    expect(classifierApis.size).toBeGreaterThan(0);
-    for (const api of classifierApis) {
-      expect(config.classifiers?.[api as string]?.classify).toBeTypeOf(
-        "function",
-      );
+    expect(judgeModels?.length).toBeGreaterThan(0);
+
+    // The api/kind pair is load-bearing: omp fails registerProvider when a
+    // static entry's kind is not one its api serves.
+    for (const model of judgeModels ?? []) {
+      expect(model.api).toBe("typesafe");
+      expect(model.kind).toBe("judge");
+      // Judge models carry the origin, because the typesafe wire appends
+      // `/v1/systemone` itself.
+      expect(model.baseUrl).toBe("https://kenari.id");
     }
+  });
+
+  it("gives chat models the /v1 base so omp appends /chat/completions once", () => {
+    const { providers } = capture();
+    const chatModels =
+      providers[0]?.config.models.filter((m) => m.kind !== "judge") ?? [];
+
+    expect(chatModels.length).toBeGreaterThan(0);
+    for (const model of chatModels) {
+      expect(model.baseUrl).toBe("https://kenari.id/v1");
+    }
+  });
+
+  it("does not use the pi-only registration surfaces", () => {
+    const { providers } = capture();
+    const config = providers[0]?.config;
+
+    // `classifiers` does not exist in omp; registering it is dead weight that
+    // suggests a transport is wired when it is not.
+    expect(config?.classifiers).toBeUndefined();
+    // `openai-completions` is built into omp, so a custom stream is unnecessary
+    // and would bypass omp's own retry and normalization layers.
+    expect(config?.streamSimple).toBeUndefined();
+    // Discovery is `fetchDynamicModels`, not `refreshModels`.
+    expect(config?.fetchDynamicModels).toBeTypeOf("function");
+  });
+
+  it("wires up login and env-var auth", () => {
+    const { providers } = capture();
+    const config = providers[0]?.config;
+
+    expect(config?.apiKey).toBe("KENARI_API_KEY");
+    expect(config?.authHeader).toBe(true);
+    expect(config?.oauth).toBeDefined();
   });
 
   it("registers every tool", () => {
     const { tools } = capture();
     expect(tools).toContain("system_one");
     expect(tools).toContain("generate_image");
-    // Distinct from pi's built-in `web_search` on purpose.
+    // Distinct from omp's built-in `web_search` on purpose.
     expect(tools).toContain("kenari_web_search");
   });
 });

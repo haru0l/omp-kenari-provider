@@ -1,17 +1,17 @@
 /**
- * Shared type definitions for pi-kenari-provider.
+ * Shared type definitions for omp-kenari-provider.
  */
-import type { Model } from "@earendil-works/pi-ai";
+import type { ModelSpec } from "@oh-my-pi/pi-ai";
 export declare const PROVIDER_KENARI = "kenari";
 export declare const BASE_URL_KENARI = "https://kenari.id/v1";
 export declare const KENARI_API_KEY_ENV = "KENARI_API_KEY";
 /** A kenari model that speaks the OpenAI Chat Completions wire format. */
-export interface KenariOpenAIModel extends Model<"openai-completions"> {
+export interface KenariOpenAIModel extends ModelSpec<"openai-completions"> {
     /** Whether this is a :free variant (no balance deducted). */
     isFree?: boolean;
 }
 /** A kenari model that speaks the Anthropic Messages wire format. */
-export interface KenariAnthropicModel extends Model<"anthropic-messages"> {
+export interface KenariAnthropicModel extends ModelSpec<"anthropic-messages"> {
     isFree?: boolean;
 }
 /** Union of all kenari model types. */

@@ -1,163 +1,79 @@
 /**
- * pi-kenari-provider
+ * omp-kenari-provider
  *
- * A pi extension that registers kenari as a native AI provider. kenari
- * (https://kenari.id/v1) is an LLM gateway that speaks both the OpenAI
- * Chat Completions API and the Anthropic Messages API, routes to many
- * upstream providers, and bills in Indonesian Rupiah.
+ * An omp (oh-my-pi) extension that registers kenari as a native AI provider.
+ * kenari (https://kenari.id/v1) is an LLM gateway that speaks both the OpenAI
+ * Chat Completions API and the Anthropic Messages API, routes to many upstream
+ * providers, and bills in Indonesian Rupiah.
  *
  * Features:
  *  - Dynamic model discovery from GET /v1/models (public, no key needed)
  *  - OpenAI-completions wire format (kenari is an OpenAI drop-in)
  *  - :free model variants (no balance deducted)
- *  - Image generation, embeddings, rerank, moderations, system one
+ *  - System One models registered as native omp `judge` models
+ *  - Image generation, embeddings, rerank, moderations
  *  - Web and X search (POST /v1/web/search, /v1/web/fetch, /v1/x/search),
  *    with web search also registered as the `kenari_web_search` tool
  *  - API key auth via KENARI_API_KEY env var or /login kenari
+ *
+ * Two omp details shape this file:
+ *
+ *  1. `openai-completions` is a built-in omp API, so the provider needs no
+ *     `streamSimple`: omp dispatches chat models through its own transport.
+ *  2. omp has no classifiers. System One models are judge models instead, and
+ *     they carry their own per-model `baseUrl` because the `typesafe` wire
+ *     wants the origin while every other kenari surface wants `/v1`.
  */
 
 import { fileURLToPath } from "node:url";
-import type {
-  Api,
-  AssistantMessage,
-  AssistantMessageEventStream,
-  Context,
-  Model,
-  OAuthCredentials,
-  RefreshModelsContext,
-  SimpleStreamOptions,
-  StreamOptions,
-} from "@earendil-works/pi-ai";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-// Lazy so the System One classifier transport only loads when a classify call
-// actually runs, matching how pi loads its own built-in classifiers.
-import { typesafeSystemOneApi } from "@earendil-works/pi-ai/api/typesafe-system-one.lazy";
+import type { Model, OAuthCredentials } from "@oh-my-pi/pi-ai";
 import type {
   ExtensionAPI,
   ProviderModelConfig,
-} from "@earendil-works/pi-coding-agent";
+} from "@oh-my-pi/pi-coding-agent";
 import { BASE_URL_KENARI, PROVIDER_KENARI } from "./constants.js";
-import { getKenariBaselineModels, refreshKenariModels } from "./models.js";
 import {
+  fetchKenariDynamicModels,
+  getKenariBaselineModels,
+} from "./models.js";
+import {
+  fetchKenariSystemOneDynamicModels,
   getKenariSystemOneBaselineModels,
-  refreshKenariSystemOneModels,
-  toProviderClassifierConfigs,
+  toProviderJudgeConfigs,
 } from "./systemone.js";
 import { generateImageTool } from "./tools/image.js";
 import { systemOneTool } from "./tools/systemone.js";
 import { kenariWebSearchTool } from "./tools/web.js";
 import type { KenariModel } from "./types.js";
-
-// =============================================================================
-// Lazy compat bridge
-// =============================================================================
-
-interface KenariCompatApi {
-  openAICompletionsApi(): {
-    stream: (
-      model: Model<Api>,
-      context: Context,
-      options?: StreamOptions,
-    ) => AssistantMessageEventStream;
-    streamSimple: (
-      model: Model<Api>,
-      context: Context,
-      options?: SimpleStreamOptions,
-    ) => AssistantMessageEventStream;
-  };
-}
-
-let compatPromise: Promise<KenariCompatApi> | undefined;
-
-/** Single-flight dynamic import; failures are not cached so a later stream can retry. */
-function loadPiAiCompat(): Promise<KenariCompatApi> {
-  if (!compatPromise) {
-    compatPromise = import("@earendil-works/pi-ai/compat")
-      .then((mod) => mod as unknown as KenariCompatApi)
-      .catch((error) => {
-        compatPromise = undefined;
-        throw error;
-      });
-  }
-  return compatPromise;
-}
-
-function createStreamErrorEvent(
-  model: Model<Api>,
-  options: StreamOptions | undefined,
-  error: unknown,
-): AssistantMessage {
-  return {
-    role: "assistant",
-    content: [],
-    api: model.api,
-    provider: model.provider,
-    model: model.id,
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-    stopReason: options?.signal?.aborted ? "aborted" : "error",
-    errorMessage: error instanceof Error ? error.message : String(error),
-    timestamp: Date.now(),
-  };
-}
-
-/** Stream function that delegates to the compat OpenAI completions API. */
-function kenariStreamSimple(
-  model: Model<Api>,
-  context: Context,
-  options?: SimpleStreamOptions,
-): AssistantMessageEventStream {
-  const outer = createAssistantMessageEventStream();
-  void (async () => {
-    try {
-      const compat = await loadPiAiCompat();
-      const inner = compat
-        .openAICompletionsApi()
-        .streamSimple(model, context, options as StreamOptions);
-      for await (const event of inner) outer.push(event);
-      if (typeof inner.result === "function") {
-        outer.end(await inner.result());
-      } else {
-        outer.end();
-      }
-    } catch (error) {
-      const message = createStreamErrorEvent(model, options, error);
-      outer.push({
-        type: "error",
-        reason: message.stopReason as "aborted" | "error",
-        error: message,
-      });
-    }
-  })();
-  return outer;
-}
-
 // =============================================================================
 // Model conversion
 // =============================================================================
 
-/** Convert kenari models to pi's ProviderConfigInput models format. */
-function toProviderModelConfigs(models: KenariModel[]) {
+/**
+ * Convert kenari chat models to the configs `registerProvider` accepts.
+ *
+ * `baseUrl` is emitted per model rather than relying on the provider-level one,
+ * because kenari's chat and judge surfaces live at different roots: chat wants
+ * `https://kenari.id/v1` (omp appends `/chat/completions`), while the `typesafe`
+ * judge wire appends `/v1/systemone` and so wants the bare origin. Emitting it
+ * per model keeps both correct without a second provider registration.
+ */
+function toProviderModelConfigs(models: KenariModel[]): ProviderModelConfig[] {
   return models.map((m) => ({
     id: m.id,
     name: m.name,
     api: m.api,
     baseUrl: m.baseUrl,
     reasoning: m.reasoning ?? false,
-    thinkingLevelMap: m.thinkingLevelMap,
-    input: m.input,
+    ...(m.thinking !== undefined ? { thinking: m.thinking } : {}),
+    input: [...m.input],
     cost: m.cost,
-    contextWindow: m.contextWindow,
-    maxTokens: m.maxTokens,
-    samplingParams: m.samplingParams,
-    compat: m.compat,
-    headers: m.headers,
+    // `ModelSpec.contextWindow` is nullable (a spec may omit one); the provider
+    // config requires a concrete number, so fall back to a sane default.
+    contextWindow: m.contextWindow ?? 131072,
+    maxTokens: m.maxTokens ?? 65536,
+    ...(m.compat !== undefined ? { compat: m.compat } : {}),
+    ...(m.headers !== undefined ? { headers: m.headers } : {}),
   }));
 }
 
@@ -165,29 +81,30 @@ function toProviderModelConfigs(models: KenariModel[]) {
 // Extension entry point
 // =============================================================================
 
-export default function (pi: ExtensionAPI) {
+export default function (omp: ExtensionAPI) {
   const baselineChatConfigs = toProviderModelConfigs(getKenariBaselineModels());
-  // System One models are classifiers: callable through models.classify(), never
-  // in /model. Both kinds share one provider model list, so a refresh replaces
-  // the chat catalog without dropping the classifiers.
-  const baselineClassifierConfigs = toProviderClassifierConfigs(
+  // System One models are judge models: they answer bounded questions instead of
+  // generating text, so they live in omp's `judge` role rather than /model.
+  // They carry their own origin baseUrl; chat models carry the /v1 one.
+  const baselineJudgeConfigs = toProviderJudgeConfigs(
     getKenariSystemOneBaselineModels(),
   );
 
-  pi.registerProvider(PROVIDER_KENARI, {
-    name: "kenari",
+  omp.registerProvider(PROVIDER_KENARI, {
     baseUrl: BASE_URL_KENARI,
     api: "openai-completions",
-    apiKey: "$KENARI_API_KEY",
+    // A plain env-var name; omp resolves it, and a key stored by
+    // `/login kenari` wins over it because `oauth` is present.
+    apiKey: "KENARI_API_KEY",
     authHeader: true,
-    models: [...baselineChatConfigs, ...baselineClassifierConfigs],
-    streamSimple: kenariStreamSimple,
-    // The classifier models above need their transport registered too: without
-    // this map pi leaves provider.classify undefined and every
-    // models.classify() call fails with "no classifier implementation".
-    classifiers: {
-      "typesafe-system-one": typesafeSystemOneApi(),
-    },
+    models: [...baselineChatConfigs, ...baselineJudgeConfigs],
+    // No `streamSimple`: `openai-completions` is a built-in omp API and omp
+    // dispatches these chat models through its own transport.
+    //
+    // No `classifiers`: omp has no classifier concept. The System One models
+    // above are `kind: "judge"` on the built-in `typesafe` api instead, which
+    // is what wires them into the judge role.
+
     // API-key login so /login kenari stores the key for later sessions.
     oauth: {
       name: "kenari API key",
@@ -206,32 +123,42 @@ export default function (pi: ExtensionAPI) {
       refreshToken: async (credentials) => credentials,
       getApiKey: (credentials) => credentials.access,
     },
-    refreshModels: async (
-      context: RefreshModelsContext,
-    ): Promise<ProviderModelConfig[]> => {
-      const [models, systemOneModels] = await Promise.all([
-        refreshKenariModels(context),
-        refreshKenariSystemOneModels(context),
+
+    /**
+     * Live discovery. omp calls this with the resolved API key and replaces the
+     * extension-provided models with whatever it returns, falling back to the
+     * static `models` above when the fetch fails.
+     *
+     * Both catalogs are fetched: the chat catalog from the bare endpoint and the
+     * judge catalog from `?modality=systemone`. Each model keeps its own
+     * `baseUrl`, so the judge entries stay on the origin.
+     */
+    fetchDynamicModels: async (
+      apiKey: string | undefined,
+    ): Promise<readonly ProviderModelConfig[]> => {
+      const [chatModels, judgeModels] = await Promise.all([
+        fetchKenariDynamicModels(apiKey),
+        fetchKenariSystemOneDynamicModels(apiKey),
       ]);
       return [
-        ...toProviderModelConfigs(models),
-        ...toProviderClassifierConfigs(systemOneModels),
+        ...toProviderModelConfigs(chatModels),
+        ...toProviderJudgeConfigs(judgeModels),
       ];
     },
   });
 
   // system_one: bounded judgments through kenari's System One models.
-  pi.registerTool(systemOneTool);
+  omp.registerTool(systemOneTool);
 
   // generate_image: draw with kenari image models, render inline, save to cwd.
-  pi.registerTool(generateImageTool);
+  omp.registerTool(generateImageTool);
 
   // kenari_web_search: live web search, authenticated by the /login kenari key.
-  pi.registerTool(kenariWebSearchTool);
+  omp.registerTool(kenariWebSearchTool);
 
   // Ship the skill with the extension. Resolving the path from this module
   // means an installed package and a local checkout both find it.
-  pi.on("resources_discover", () => ({
+  omp.on("resources_discover", () => ({
     skillPaths: [fileURLToPath(new URL("../skills", import.meta.url))],
   }));
 }
@@ -250,7 +177,7 @@ export { webFetch, webSearch, xSearch } from "./api/web.js";
 export {
   fetchKenariModels,
   fetchKenariModelsByModality,
-  refreshKenariModels,
+  fetchKenariDynamicModels,
   toKenariModels,
 } from "./models.js";
 export { generateImageTool } from "./tools/image.js";

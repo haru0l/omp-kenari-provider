@@ -127,9 +127,9 @@ rejects an image sent to either before the request leaves.
 default for each request shape; prefer it over this table, which can go stale.
 
 The live list is `GET https://kenari.id/v1/models?modality=systemone`; the
-provider also registers every questions-capable model as a pi classifier, so
-`models.classify({ model: "kenari/clef:free", ... })` reaches the same endpoint
-from codemode and extensions.
+provider also registers every questions-capable model as an omp judge model
+(`api: "typesafe"`, `kind: "judge"`), so the same endpoint answers everything
+omp routes through its `judge` role once one is selected.
 
 ## Errors
 

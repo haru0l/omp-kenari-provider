@@ -8,7 +8,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { Type } from "typebox";
+import { Type } from "@oh-my-pi/omptype/typebox";
 import { runSystemOne } from "../api/systemone.js";
 import { PROVIDER_KENARI } from "../constants.js";
 import { fetchKenariSystemOneModelCatalog, getKenariSystemOneInputRate, } from "../systemone.js";
@@ -29,6 +29,13 @@ import { renderSystemOneModelCatalog, renderSystemOneResult, } from "./systemone
  * establishes the canonical System One contract — `{type: "choice" |
  * "noul" | "score" | "box", instructions, criteria}` per question — and rejects
  * what cannot be repaired with an actionable error.
+ */
+/*
+ * The explicit `TObject`/`TObject`-free annotations below exist because
+ * omptype's inferred schema types mention unexported helper interfaces
+ * (`LegacyTypeBoxCompat`, `RuntimeType`), which TypeScript refuses to name in a
+ * declaration file. `TSchema` is the public, nameable supertype of every schema
+ * omptype builds, so annotating keeps `declaration: true` emitting.
  */
 export const systemOneParams = Type.Object({
     action: Type.Optional(Type.String({
@@ -991,52 +998,6 @@ function normalizeArgs(args, drops) {
     }
     return out;
 }
-// Keep codemode's result small and question-name keyed; each answer carries
-// its own kind-specific fields without requiring a per-kind schema union.
-const systemOneAnswersOutput = Type.Object({
-    answers: Type.Object({}, {
-        additionalProperties: Type.Object({
-            type: Type.String(),
-            noul: Type.Optional(Type.Number()),
-            choice: Type.Optional(Type.String()),
-            score: Type.Optional(Type.Number()),
-            probabilities: Type.Optional(Type.Object({}, { additionalProperties: Type.Number() })),
-            legend: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-            confidence: Type.Optional(Type.Number()),
-        }, { additionalProperties: true }),
-    }),
-    model: Type.Optional(Type.String()),
-    usage: Type.Optional(Type.Object({
-        inputTokens: Type.Optional(Type.Number()),
-        outputTokens: Type.Optional(Type.Number()),
-    })),
-    requestId: Type.Optional(Type.String()),
-    metadata: Type.Object({
-        provider: Type.String(),
-        latencyMs: Type.Optional(Type.Number()),
-    }),
-});
-// `action: "models"` answers with the catalog and judges nothing, so the two
-// results share no `answers` slot — the union keeps each shape honest.
-const systemOneModelsOutput = Type.Object({
-    models: Type.Array(Type.Object({
-        id: Type.String(),
-        name: Type.String(),
-        isFree: Type.Boolean(),
-        input: Type.Array(Type.String()),
-        capabilities: Type.Array(Type.String()),
-        inputMicroIdr: Type.Optional(Type.Number()),
-    })),
-    defaults: Type.Object({
-        questions: Type.String(),
-        fields: Type.String(),
-    }),
-    source: Type.String(),
-});
-const systemOneOutput = Type.Union([
-    systemOneAnswersOutput,
-    systemOneModelsOutput,
-]);
 /**
  * Runtime semantic validation: "is this actually a valid System One
  * request?" The public schema lets repairable shapes through; this gate
@@ -1159,9 +1120,9 @@ async function renderModelCatalogAction(signal) {
             source: catalog.source,
             action: "models",
             metadata: { provider: PROVIDER_KENARI },
+            // Nothing was judged, so nothing was billed.
+            usage: zeroUsage(),
         },
-        // Nothing was judged, so nothing was billed.
-        usage: zeroUsage(),
     };
 }
 /** Image formats kenari accepts for `assets`. */
@@ -1264,40 +1225,28 @@ export const systemOneTool = {
     description: "Judge bounded decisions over explicitly supplied state with a dedicated kenari System One model - calibrated probabilities conditional on that state (confidence for choice/score only; noul has no confidence field, its probability is the uncertainty measure). " +
         "Call system_one instead of making a bounded judgment directly when the decision is a pick from named options, a yes/no likelihood, a rubric score, or a region located in an image. This applies both to final answers and intermediate agent decisions such as classification, routing, or choosing among plausible tools, skills, strategies, implementations, models, or providers. " +
         "The judge only weighs the state you supply: it cannot recall facts or browse, so retrieve evidence first and never ask it to recall facts. " +
-        "Do not use it for open-ended generation itself or factual lookup. A generative task may still contain bounded intermediate judgments where system_one is useful. " +
-        "Questions that share the same state can be evaluated together in one call. " +
+        "Do not use it for open-ended generation itself - writing, drafting, composing, generating code, or explaining - or for factual lookup. A generative task may still contain bounded intermediate judgments where system_one is useful. " +
+        "Do not use it for trivial or mechanically obvious selections where there is no meaningful judgment to make; use it when multiple candidates are genuinely plausible and the choice depends on supplied or retrieved evidence. " +
+        "Questions that share the same state can be evaluated together in one call; batch independent questions rather than making one call per question. " +
         'Each question is {"type": "choice" | "noul" | "score" | "box", "instructions": "...", "criteria": ...}: ' +
-        'choice criteria is an object keyed by choice label ({"a": null, "b": null}), ' +
+        'choice criteria is an object keyed by choice label - the keys are the available choices, so preserve user-specified labels and use null values when labels are self-explanatory; never add a separate options field. ' +
         "noul usually omits criteria, " +
         "score criteria is an ordered array of at least two levels, " +
         'box takes no criteria and needs an image under "assets". ' +
+        'Pick the question type mechanically: unordered alternatives (frontend, backend, platform) -> choice; yes/no -> noul; ordered scale, rating, severity, risk, or grade -> score; where in an image something is -> box with the image under assets. Never use choice for an ordered scale merely because its levels have names: very low / low / moderate / high / very high is score, not choice. ' +
         'Clairic models extract structured data instead: send "fields" with typed entries (text, number, date, list, estimate, ...). ' +
-        'Images travel under reference names in "assets" - cite the name in instructions. Models: clef:free (default), clef-flash:free, clef-omni:free, clef, jev-1-13, jev-1-14; clairic:free handles fields. Omitting model is free-first: clef:free, then clef-flash:free, then the other free models, and only then a paid one.',
+        'Images travel under reference names in "assets" - cite the name in instructions. ' +
+        "Models: clef:free (default), clef-flash:free, clef-omni:free, clef, jev-1-13, jev-1-14; clairic:free handles fields. Omitting model is free-first: clef:free, then clef-flash:free, then the other free models, and only then a paid one.",
     parameters: systemOneParams,
-    outputSchema: systemOneOutput,
-    promptSnippet: "Use system_one for bounded judgments over supplied evidence, including classification, routing, and selecting among plausible tools, skills, strategies, implementations, models, or providers",
-    promptGuidelines: [
-        "Whenever you encounter a bounded judgment over supplied or retrieved evidence, including as an intermediate step in a larger task, call system_one instead of making the judgment yourself. A bounded judgment is choosing among explicit alternatives, making a yes/no judgment, or rating something on an ordered scale.",
-        "Common bounded-choice patterns include classification into known labels, selecting among plausible candidate tools or skills, routing among models/providers, and choosing among plausible strategies or implementations. These are examples, not an exhaustive list; recognize other bounded decisions from their structure.",
-        "Pick the system_one question type mechanically: unordered alternatives (frontend, backend, platform) -> choice; yes/no -> noul; ordered scale, rating, severity, risk, or grade -> score; where in an image something is -> box with the image under assets. Never use choice for an ordered scale merely because its levels have names: very low / low / moderate / high / very high is score, not choice.",
-        "Retrieve missing factual evidence into state first; never ask system_one to recall facts or browse. Use system_one for bounded judgments over available evidence, not as a replacement for factual lookup.",
-        "Do not use system_one to perform open-ended generation itself - writing, drafting, composing, generating code, or explaining. However, a generative task may contain bounded intermediate judgments where system_one is appropriate, such as classification, routing, or choosing among plausible tools, skills, strategies, implementations, models, or providers.",
-        "Do not use system_one for trivial or mechanically obvious selections where there is no meaningful judgment to make. Use it when multiple candidates are genuinely plausible and the choice depends on supplied or retrieved evidence.",
-        "Batch independent system_one questions sharing the same state into one call instead of one call per question.",
-        "For system_one choice questions, the keys of criteria are the available choices - preserve user-specified labels and use null values when labels are self-explanatory; never add a separate options field.",
-        "Use system_one when you need to make fast decisions in bulk",
-    ],
-    prepareArguments: (args) => prepareSystemOneArgs(args),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         /*
          * The LLM-facing TypeBox schema is intentionally separate from the
          * provider protocol types. Cast only at this boundary instead of
          * spreading `any` throughout the implementation.
          *
-         * `prepareArguments` above is an optimization: it runs before schema
-         * validation where Pi supports it, but correctness never depends on it -
-         * re-normalize here so every path converges on the same canonical shape
-         * before semantic validation.
+         * omp has no `prepareArguments` hook, so normalization happens here and
+         * only here: every call converges on the same canonical shape before
+         * semantic validation.
          */
         const normalized = prepareSystemOneArgs(params);
         // prepareSystemOneArgs passes non-objects through untouched; direct
@@ -1366,10 +1315,10 @@ export const systemOneTool = {
         });
         const latencyMs = Date.now() - startedAt;
         const answers = response.answers;
-        const usage = {
-            inputTokens: response.usage?.input_tokens ?? 0,
-            outputTokens: response.usage?.output_tokens ?? 0,
-        };
+        // Priced at the catalog rate so session cost accounting stays right. Price
+        // with the id we asked for: kenari echoes a versioned one ("jev-1-14" comes
+        // back as "jev-1.14.0") that the catalog does not know.
+        const usage = toUsage(response, model);
         return {
             content: [
                 {
@@ -1383,10 +1332,10 @@ export const systemOneTool = {
                 model: response.model,
                 usage,
             },
-            // Priced at the catalog rate so session cost accounting stays right.
-            // Price with the id we asked for: kenari echoes a versioned one
-            // ("jev-1-14" comes back as "jev-1.14.0"), which the catalog doesn't know.
-            usage: toUsage(response, model),
+            // omp's AgentToolResult has no top-level `usage`; the priced usage rides
+            // in `details` below. It is priced with the id we asked for, because
+            // kenari echoes a versioned one ("jev-1-14" comes back as "jev-1.14.0")
+            // that the catalog does not know.
             details: {
                 answers,
                 model: response.model,

@@ -76,7 +76,7 @@ describe("generate_image tool", () => {
     });
     expect(result.content[0]).toHaveProperty("data", PNG_BASE64);
 
-    const [file] = result.details.files as string[];
+    const [file] = result.details?.files as string[];
     expect(file).toMatch(/^generated-\d{8}-\d{6}\.png$/);
     const written = await readFile(join(cwd, file as string));
     expect(written.toString("base64")).toBe(PNG_BASE64);
@@ -84,7 +84,7 @@ describe("generate_image tool", () => {
     const text = result.content[result.content.length - 1];
     expect(text).toMatchObject({ type: "text" });
     expect((text as { text: string }).text).toContain(file as string);
-    expect(result.details.revisedPrompts).toEqual(["a revised prompt"]);
+    expect(result.details?.revisedPrompts).toEqual(["a revised prompt"]);
   });
 
   it("numbers the images of one call and keeps the requested name", async () => {
@@ -99,8 +99,8 @@ describe("generate_image tool", () => {
       context(cwd) as never,
     );
 
-    expect(result.details.files).toEqual(["art.png", "art-2.png"]);
-    for (const file of result.details.files as string[]) {
+    expect(result.details?.files).toEqual(["art.png", "art-2.png"]);
+    for (const file of result.details?.files as string[]) {
       expect((await readFile(join(cwd, file))).toString("base64")).toBe(
         PNG_BASE64,
       );
@@ -123,7 +123,7 @@ describe("generate_image tool", () => {
       context(cwd) as never,
     );
 
-    expect(result.details.files).toEqual(["art-1.png"]);
+    expect(result.details?.files).toEqual(["art-1.png"]);
     expect(await readFile(join(cwd, "art.png"), "utf8")).toBe("keep me");
   });
 

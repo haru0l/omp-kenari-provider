@@ -9,8 +9,8 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import { Type } from "@oh-my-pi/omptype/typebox";
 import { generateImageBytes } from "../api/images.js";
 import { DEFAULT_IMAGE_MODEL, PROVIDER_KENARI } from "../constants.js";
 import type { KenariImageResult } from "../types.js";
@@ -83,10 +83,6 @@ export interface GenerateImageDetails {
   revisedPrompts: string[];
 }
 
-const generateImageOutput = Type.Object({
-  model: Type.String(),
-  files: Type.Array(Type.String()),
-});
 
 /** `20261030-114233`, local time, sortable and filename-safe. */
 function timestamp(now: Date): string {
@@ -162,21 +158,12 @@ export const generateImageTool: ToolDefinition<
   description:
     "Draw an image from a text prompt with a kenari image model. The picture is rendered in the conversation and also saved into the working directory, so it can be opened, edited, or referenced by path afterwards. " +
     `Defaults to the free ${DEFAULT_IMAGE_MODEL}; other free models are agnes-image-2-1-flash:free and agnes-image-2-0-flash:free, and paid ones include gpt-image-2, nano-banana-pro, grok-imagine-image and qwen-image-3.0-pro. ` +
-    'The model does not see the conversation: put the whole description in "prompt", and say so explicitly when the image should match an existing style or subject. ' +
-    'Use "output" to choose the file name (e.g. "logo.png") instead of the timestamped default, and "n" for several variations in one call.',
+    'The model does not see the conversation: put the whole description in "prompt" (subject, composition, style, colours, lighting, and any text that must appear), and say so explicitly when the image should match an existing style or subject. ' +
+    'Use "output" to choose the file name (e.g. "logo.png") instead of the timestamped default, and "n" for several variations in one call. ' +
+    'Name the output file when the picture has an obvious role ("logo.png", "hero.png") so later steps can reference it by path; otherwise let the timestamped default stand. ' +
+    "After a successful call, refer to the saved file path rather than pasting base64, and do not re-generate the same prompt to \"check\" it.",
 
   parameters: generateImageParams,
-  outputSchema: generateImageOutput,
-
-  promptSnippet:
-    "Use generate_image to draw pictures; it renders them inline and saves them into the working directory",
-
-  promptGuidelines: [
-    "When the user asks for an image, a picture, a drawing, a logo, or a visual mockup, call generate_image instead of describing what the image would look like.",
-    "Write the prompt as a self-contained description: subject, composition, style, colours, lighting, and any text that must appear. The image model cannot see the conversation or read files.",
-    'Name the output file when the picture has an obvious role ("logo.png", "hero.png") so later steps can reference it by path; otherwise let the timestamped default stand.',
-    'After a successful call, refer to the saved file path rather than pasting base64, and do not re-generate the same prompt to "check" it.',
-  ],
 
   async execute(_toolCallId, params, signal, _onUpdate, ctx) {
     const prompt = params.prompt.trim();

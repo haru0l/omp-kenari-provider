@@ -1,12 +1,12 @@
-# pi-kenari-provider
+# omp-kenari-provider
 
-A [pi](https://github.com/earendil-works/pi) extension that registers [kenari](https://kenari.id) as a native AI provider.
+An [omp (oh-my-pi)](https://omp.sh) extension that registers [kenari](https://kenari.id) as a native AI provider.
 
 kenari is an LLM gateway — one base URL (`https://kenari.id/v1`) speaks both the OpenAI Chat Completions API and the Anthropic Messages API, routes to many upstream providers, and bills in Indonesian Rupiah from a prepaid balance.
 
 ## Features
 
-- **Dynamic model discovery** — fetches the full catalog from `GET /v1/models` (public, no key needed) on session start
+- **Dynamic model discovery** — fetches the full catalog from `GET /v1/models` (public, no key needed) through `fetchDynamicModels`
 - **Dual wire formats** — supports both `openai-completions` and `anthropic-messages` APIs
 - **:free models** — surfaces free-tier variants (e.g. `step-3-7-flash:free`) that deduct no balance
 - **Image generation** — `POST /v1/images/generations` (OpenAI Images-compatible)
@@ -14,29 +14,29 @@ kenari is an LLM gateway — one base URL (`https://kenari.id/v1`) speaks both t
 - **Rerank** — `POST /v1/rerank` (Cohere-style relevance ranking)
 - **Moderations** — `POST /v1/moderations` (OpenAI Moderations-compatible)
 - **System One** — `POST /v1/systemone` for typed questions (noul, choice, score, box) and Clairic field extraction
-- **System One classifiers** — registers every questions-capable System One model as a pi classifier, callable from codemode (`models.classify`) and extensions, deliberately kept out of `/model`
+- **System One as omp judge models** — every questions-capable System One model is registered as a native `kind: "judge"` model on omp's built-in `typesafe` api, so omp's `judge` role, `judge_batch` and jfind ranking can select a kenari model directly
 - **`system_one` tool + `system-one` skill** — the bundled skill routes decisions, image questions and field extraction to the tool, which defaults free-first (`clef:free`, then `clef-flash:free`, then any other free model; `clairic:free` for `fields`) and only spends on a paid model when no free one can answer. Lists the live catalog on `action: "models"`
 - **`generate_image` tool** — draws with kenari image models, renders the picture inline in the conversation, and saves the same bytes into the working directory
 - **Specialized model discovery** — `GET /v1/models?modality=` for `embedding`, `rerank`, `moderation` and `systemone` models
 - **Web search / fetch / X search** — `POST /v1/web/search`, `/v1/web/fetch` and `/v1/x/search`
-- **API key auth** — via `KENARI_API_KEY` env var or `/login kenari` (stored in `~/.pi/agent/auth.json`)
+- **API key auth** — via `KENARI_API_KEY` env var or `/login kenari`
 
 ## Installation
 
-The package is loaded as a pi extension. Add it to your pi configuration:
+The package declares an `omp` manifest, so omp discovers it as an extension package:
 
 ```json
 {
-  "extensions": [
-    "./node_modules/pi-kenari-provider/dist/index.js"
-  ]
+  "omp": {
+    "extensions": ["./dist/index.js"]
+  }
 }
 ```
 
 Or install from GitHub:
 
 ```bash
-npm install haru0l/pi-kenari-provider
+omp plugin install haru0l/omp-kenari-provider
 ```
 
 ## Authentication
@@ -47,7 +47,7 @@ Set your kenari API key (starts with `kn-`):
 export KENARI_API_KEY=kn-...
 ```
 
-Or run `/login kenari` in pi to store the key securely.
+Or run `/login kenari` in omp to store the key securely. A key saved by `/login` wins over the env var.
 
 Get your key from the [kenari dashboard](https://kenari.id/login).
 
@@ -60,36 +60,44 @@ kenari/step-3-7-flash:free    # Free tier
 kenari/step-3-7-flash         # Paid from balance
 ```
 
-Use them like any pi model:
+Use them like any omp model:
 
 ```
 > kenari/step-3-7-flash:free
 Hello!
 ```
 
-## System One
+Judge models are separate from chat models and are selected through omp's `judge` role:
 
-System One models answer bounded questions about state you supply. They are not chat models, so they never appear in `/model` — they are registered as pi **classifiers** and reachable two ways.
-
-**From codemode or an extension** — every questions-capable System One model is a classifier (`clef:free`, `clef-flash:free`, `clef-omni:free`, `clef`, `jev-1-13`, `jev-1-14`). The classifier interface speaks `bool`, `choice` and `score`, over text and images; `bool` goes on the wire as kenari's `noul`:
-
-```js
-const clef = models.getAvailableOfType("classifier").find((m) => m.id === "clef:free");
-const out = await models.classify(clef, {
-  state: "the deploy failed twice with 503 from the gateway",
-  questions: {
-    incident: { type: "bool", instructions: "Is this a production incident?" },
-    owner: {
-      type: "choice",
-      instructions: "Which team owns it?",
-      criteria: { gateway: "routing", worker: "jobs" },
-    },
-  },
-});
-// out.answers.incident -> { type: "bool", probability: 0.63 }
+```
+/model judge kenari/clef:free
 ```
 
-Extensions use `ctx.modelRegistry.classify()` with the same context shape.
+## Base URLs, and why models carry their own
+
+omp appends a path to whatever base URL a model is given, and kenari's two surfaces sit at different roots:
+
+| Surface | Model base | omp appends | Final URL |
+| --- | --- | --- | --- |
+| Chat | `https://kenari.id/v1` | `/chat/completions` | `https://kenari.id/v1/chat/completions` |
+| Images | `https://kenari.id/v1` | `/images/generations` | `https://kenari.id/v1/images/generations` |
+| Embeddings | `https://kenari.id/v1` | `/embeddings` | `https://kenari.id/v1/embeddings` |
+| Rerank | `https://kenari.id/v1` | `/rerank` | `https://kenari.id/v1/rerank` |
+| Judge | `https://kenari.id` | `/v1/systemone` | `https://kenari.id/v1/systemone` |
+
+One provider-level `baseUrl` cannot serve both, so every registered model carries its own. Judge models use the bare origin; everything else uses `/v1`. Getting this wrong requests `/v1/v1/systemone`, which is why it is stated explicitly and pinned by tests.
+
+## System One
+
+System One models answer bounded questions about state you supply. They are not chat models, so they never appear in `/model` — they are registered as omp **judge** models (`api: "typesafe"`, `kind: "judge"`) and reachable two ways.
+
+**From omp's judge role** — every questions-capable System One model (`clef:free`, `clef-flash:free`, `clef-omni:free`, `clef`, `jev-1-13`, `jev-1-14`) is registered with `api: "typesafe"` and `kind: "judge"`. omp's `typesafe` wire posts kenari's own `{ model, state, questions }` body to `{baseUrl}/v1/systemone`, so a kenari model answers every judgment omp routes through its `judge` role: `judge_batch`, jfind's cascade ranking, and anything else resolving the judge chain. Select one with:
+
+```
+/model judge kenari/clef:free
+```
+
+Nothing in omp can `classify()` — that was pi's API. The judge role replaced it.
 
 **From chat** — the extension registers a `system_one` tool and ships the `system-one` skill that tells the model when to call it. The tool also reaches what the classifier interface cannot express: `box` questions (locate something in an image), Clairic `fields` extraction, audio/video state, and `reference_date` anchoring.
 
@@ -104,17 +112,17 @@ That action is public, so it works before login, and it refreshes the cache mode
 
 ## API
 
-### `default(pi: ExtensionAPI)`
+### `default(omp: ExtensionAPI)`
 
-The extension entry point. Registers the kenari provider with pi.
+The extension entry point. Registers the kenari provider with omp.
 
-### `createKenariProvider(): Provider`
+### `fetchKenariDynamicModels(apiKey?: string): Promise<KenariModel[]>`
 
-Build the kenari provider object for manual registration.
+Discover and convert the kenari chat catalog. This is the function omp calls through the provider's `fetchDynamicModels` hook; a failed fetch degrades to the static baseline rather than throwing.
 
-### `refreshKenariModels(context: RefreshModelsContext): Promise<KenariModel[]>`
+### `fetchKenariSystemOneDynamicModels(apiKey?: string): Promise<KenariSystemOneModel[]>`
 
-Fetch and convert the kenari catalog. Called by pi's model refresh lifecycle.
+Discover the System One catalog from `GET /v1/models?modality=systemone` and return it as omp judge models. Also refreshes the cache that `system_one`'s model choice resolves against.
 
 ### `fetchKenariModels(signal?: AbortSignal): Promise<KenariApiModel[]>`
 
@@ -122,7 +130,7 @@ Fetch the raw model catalog from `GET /v1/models`.
 
 ### `fetchKenariModelsByModality(modality, signal?: AbortSignal): Promise<KenariApiModel[]>`
 
-Fetch models filtered by modality — `embedding`, `rerank`, `moderation` or `systemone` (`KenariModality`). Any other value returns 400. The call is public (no key needed) and returns `modality` and `pricing_lines` on each entry. These models are never part of the bare `/v1/models` chat catalog, so they do not appear in pi's `/models` list; use this to discover them programmatically.
+Fetch models filtered by modality — `embedding`, `rerank`, `moderation` or `systemone` (`KenariModality`). Any other value returns 400. The call is public (no key needed) and returns `modality` and `pricing_lines` on each entry. These models are never part of the bare `/v1/models` chat catalog, so they do not appear in omp's `/models` list; use this to discover them programmatically.
 
 ### `generateImages(options: KenariImageGenerateOptions): Promise<KenariImageResponse>`
 
@@ -189,13 +197,13 @@ const invoice = await runSystemOne({
 Answers carry `confidence`; Clairic fields also carry `guess`, `p_null` and, for text, the `span` of the guess in the read text. Use `reference_date` to anchor dates written without a year, and `options.return_state_text` to get back the text the spans refer to.
 `choice` and `score` answers carry `confidence`; a `noul` answer carries only its probability (`noul`), which is its uncertainty measure. `score` is fractional — 1.67 sits between two `legend` labels. Clairic fields also carry `guess`, `p_null` and, for text, the `span` of the guess in the read text. Use `reference_date` to anchor dates written without a year, and `options.return_state_text` to get back the text the spans refer to.
 
-### System One classifiers
+### System One judge models
 
-`getKenariSystemOneBaselineModels()` returns the six questions-capable System One models, and `refreshKenariSystemOneModels(context)` fetches them live from `GET /v1/models?modality=systemone`. `toProviderClassifierConfigs()` turns either list into the `type: "classifier"` entries the provider registers, so they are callable through `models.classify()` and `ctx.modelRegistry.classify()` and never appear in `/model`.
+`getKenariSystemOneBaselineModels()` returns the six questions-capable System One models, and `fetchKenariSystemOneDynamicModels(apiKey)` fetches them live from `GET /v1/models?modality=systemone`. `toProviderJudgeConfigs()` turns either list into the `api: "typesafe"`, `kind: "judge"` entries the provider registers, so they are selectable through omp's `judge` role and never appear in `/model`.
 
-`clairic:free` is deliberately excluded — it answers `fields` extraction and rejects `questions`, which the classifier interface cannot express. Use the `system_one` tool for it, and for `box` questions, audio/video state and `reference_date`. It stays visible in the `action: "models"` catalog, which is for choosing rather than classifying.
+Every judge entry carries the origin base URL (`https://kenari.id`, no `/v1`) because omp's `typesafe` wire appends `/v1/systemone` itself. `clairic:free` is deliberately excluded: it answers `fields` extraction and rejects `questions`, which the `typesafe` wire cannot express. Use the `system_one` tool for it, and for `box` questions, audio/video state and `reference_date`. It stays visible in the `action: "models"` catalog, which is for choosing rather than judging.
 
-Images travel as kenari `assets` (`compat.imageInput: "assets"`) without TypeSafe's opt-in header, and `getKenariSystemOneInputRate(id)` gives the USD input rate pi uses for cost accounting.
+`getKenariSystemOneInputRate(id)` gives the USD input rate omp uses for cost accounting; a judge bills input tokens only.
 
 ### `generateImageTool` / `generate_image`
 

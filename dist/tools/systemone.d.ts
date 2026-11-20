@@ -1,6 +1,6 @@
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { Static } from "typebox";
-import { Type } from "typebox";
+import type { TSchema, Usage } from "@oh-my-pi/pi-ai";
+import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import type { Static } from "@oh-my-pi/omptype/typebox";
 import { type KenariSystemOneModelInfo } from "../systemone.js";
 /**
  * Public tool parameters (the LLM-facing boundary schema).
@@ -18,19 +18,7 @@ import { type KenariSystemOneModelInfo } from "../systemone.js";
  * "noul" | "score" | "box", instructions, criteria}` per question — and rejects
  * what cannot be repaired with an actionable error.
  */
-export declare const systemOneParams: Type.TObject<{
-    action: Type.TOptional<Type.TString>;
-    state: Type.TOptional<Type.TAny>;
-    context: Type.TOptional<Type.TAny>;
-    evidence: Type.TOptional<Type.TAny>;
-    questions: Type.TOptional<Type.TAny>;
-    question: Type.TOptional<Type.TAny>;
-    queries: Type.TOptional<Type.TAny>;
-    model: Type.TOptional<Type.TString>;
-    fields: Type.TOptional<Type.TAny>;
-    assets: Type.TOptional<Type.TAny>;
-    reference_date: Type.TOptional<Type.TString>;
-}>;
+export declare const systemOneParams: TSchema;
 export type SystemOneParams = Static<typeof systemOneParams>;
 /**
  * Compatibility shim for sloppy tool arguments. Runs before schema
@@ -56,10 +44,11 @@ export interface SystemOneDetails {
     model?: string;
     requestedModel?: string;
     action?: string;
-    usage?: {
-        inputTokens?: number;
-        outputTokens?: number;
-    };
+    /**
+     * The priced usage for this call, shaped as omp's `Usage` so session cost
+     * accounting can read `cost.total` directly.
+     */
+    usage?: Usage;
     requestId?: string;
     metadata: {
         provider: string;

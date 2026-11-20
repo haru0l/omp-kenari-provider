@@ -1,5 +1,5 @@
 /**
- * Shared type definitions for pi-kenari-provider.
+ * Shared type definitions for omp-kenari-provider.
  */
 // =============================================================================
 // Provider constants

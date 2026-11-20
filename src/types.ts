@@ -1,8 +1,8 @@
 /**
- * Shared type definitions for pi-kenari-provider.
+ * Shared type definitions for omp-kenari-provider.
  */
 
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model, ModelSpec } from "@oh-my-pi/pi-ai";
 
 // =============================================================================
 // Provider constants
@@ -14,16 +14,21 @@ export const KENARI_API_KEY_ENV = "KENARI_API_KEY";
 
 // =============================================================================
 // Kenari-specific model extensions
+//
+// These are `ModelSpec`s, not fully built `Model`s: a `compat` on a `Model` is
+// the *resolved* bag with every field present, while the sparse override that a
+// provider registration actually accepts is `ModelSpec["compat"]`. Registering
+// a hand-built `Model` would force every compat key to be spelled out.
 // =============================================================================
 
 /** A kenari model that speaks the OpenAI Chat Completions wire format. */
-export interface KenariOpenAIModel extends Model<"openai-completions"> {
+export interface KenariOpenAIModel extends ModelSpec<"openai-completions"> {
   /** Whether this is a :free variant (no balance deducted). */
   isFree?: boolean;
 }
 
 /** A kenari model that speaks the Anthropic Messages wire format. */
-export interface KenariAnthropicModel extends Model<"anthropic-messages"> {
+export interface KenariAnthropicModel extends ModelSpec<"anthropic-messages"> {
   isFree?: boolean;
 }
 

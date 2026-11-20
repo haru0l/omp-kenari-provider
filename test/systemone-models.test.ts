@@ -8,7 +8,7 @@ import {
   resetKenariSystemOneModelCatalog,
   toKenariSystemOneModel,
   toKenariSystemOneModels,
-  toProviderClassifierConfigs,
+  toProviderJudgeConfigs,
 } from "../src/systemone.js";
 import { prepareSystemOneArgs, systemOneTool } from "../src/tools/systemone.js";
 import { resolveSystemOneModel } from "../src/tools/systemone-model.js";
@@ -25,23 +25,19 @@ function apiModel(overrides: Partial<KenariApiModel> = {}): KenariApiModel {
   };
 }
 
-describe("System One classifier models", () => {
-  it("maps a free image model to a classifier with zero cost", () => {
+describe("System One judge models", () => {
+  it("maps a free image model to a judge model with zero cost", () => {
     const model = toKenariSystemOneModel(apiModel());
     expect(model).toMatchObject({
       id: "clef:free",
-      type: "classifier",
-      api: "typesafe-system-one",
+      api: "typesafe",
+      kind: "judge",
       provider: "kenari",
-      baseUrl: "https://kenari.id/v1",
+      // The typesafe wire appends `/v1/systemone`, so the base is the origin.
+      baseUrl: "https://kenari.id",
       input: ["text", "image"],
       isFree: true,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    });
-    // Images travel as named assets, without TypeSafe's opt-in header.
-    expect(model?.compat).toEqual({
-      imageInput: "assets",
-      sendImageOptInHeader: false,
     });
   });
 
@@ -100,25 +96,28 @@ describe("System One classifier models", () => {
       "jev-1-14",
     ]);
     expect(ids.some((id) => id.startsWith("clairic"))).toBe(false);
-    // clef-omni also reads audio and video; a classifier carries text and image.
+    // clef-omni also reads audio and video; a typesafe judge carries text and image.
     const omni = KENARI_SYSTEMONE_BASELINE_MODELS.find(
       (m) => m.id === "clef-omni:free",
     );
     expect(omni?.input).toEqual(["text", "image"]);
   });
 
-  it("registers classifier configs with compat intact", () => {
-    const configs = toProviderClassifierConfigs(
-      getKenariSystemOneBaselineModels(),
-    );
+  it("registers judge configs with the api/kind pair omp requires", () => {
+    const configs = toProviderJudgeConfigs(getKenariSystemOneBaselineModels());
     expect(configs).toHaveLength(6);
     expect(configs[0]).toMatchObject({
-      type: "classifier",
       id: "clef:free",
-      api: "typesafe-system-one",
+      api: "typesafe",
+      kind: "judge",
+      baseUrl: "https://kenari.id",
       contextWindow: 64_000,
     });
-    expect(configs[0]?.compat?.imageInput).toBe("assets");
+    // Every config must carry the pair; omp rejects a kind its api cannot serve.
+    for (const config of configs) {
+      expect(config.api).toBe("typesafe");
+      expect(config.kind).toBe("judge");
+    }
   });
 
   it("prices a model by id and returns zero for unknown ids", () => {
@@ -222,9 +221,9 @@ describe("system_one tool", () => {
     expect(body.state).toBe("the deploy failed twice");
 
     expect(result.content[0]).toMatchObject({ type: "text" });
-    expect(result.details.answers).toEqual({ q: { type: "noul", noul: 0.91 } });
+    expect(result.details?.answers).toEqual({ q: { type: "noul", noul: 0.91 } });
     // 1M input tokens at 850 IDR per 1M, priced in USD.
-    expect(result.usage?.cost.total).toBeCloseTo(850 / 16_500, 10);
+    expect(result.details?.usage?.cost.total).toBeCloseTo(850 / 16_500, 10);
   });
 
   it("sends Clairic fields instead of questions", async () => {
@@ -522,7 +521,7 @@ describe("system_one action: models", () => {
     expect(clairic?.capabilities).toEqual(["fields"]);
 
     expect(result.content[0]).toMatchObject({ type: "text" });
-    expect(result.usage?.cost.total).toBe(0);
+    expect(result.details?.usage?.cost.total).toBe(0);
   });
 
   it("renders prices, modalities and the two defaults", async () => {

@@ -1,18 +1,19 @@
 {
-  "name": "pi-kenari-provider",
+  "name": "omp-kenari-provider",
   "version": "0.1.0",
-  "description": "pi extension for kenari — OpenAI/Anthropic gateway with free models, images, embeddings, rerank, moderations, system one, and web search",
+  "description": "omp (oh-my-pi) extension for kenari — OpenAI/Anthropic gateway with free models, images, embeddings, rerank, moderations, judge models, and web search",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/haru0l/pi-kenari-provider.git"
+    "url": "git+https://github.com/haru0l/omp-kenari-provider.git"
   },
   "keywords": [
-    "pi-package",
-    "pi",
+    "omp",
+    "oh-my-pi",
+    "omp-package",
     "kenari",
     "llm",
     "openai",
@@ -36,32 +37,27 @@
     "test:watch": "vitest",
     "prepublishOnly": "npm run check && npm run build"
   },
-  "pi": {
+  "omp": {
     "extensions": [
       "./dist/index.js"
     ]
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^1.4.0"
+    "@oh-my-pi/omptype": "^19.0.1",
+    "@oh-my-pi/pi-ai": "^19.0.1"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=1.4.0",
-    "@earendil-works/pi-tui": ">=1.4.0",
-    "typebox": "*"
+    "@oh-my-pi/pi-coding-agent": ">=19.0.1"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-coding-agent": {
-      "optional": true
-    },
-    "@earendil-works/pi-tui": {
+    "@oh-my-pi/pi-coding-agent": {
       "optional": true
     }
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.2",
-    "@earendil-works/pi-coding-agent": "1.4.0",
-    "@earendil-works/pi-tui": "1.4.0",
-    "typebox": "1.3.27",
+    "@oh-my-pi/pi-coding-agent": "19.0.1",
+    "@types/node": "^22.20.5",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },

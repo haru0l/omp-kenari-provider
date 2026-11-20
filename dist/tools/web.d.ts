@@ -11,12 +11,11 @@
  * `generate_image`: the key stored by `/login kenari` is the same one the chat
  * models use, so there is no separate secret to configure.
  */
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import type { KenariWebSearchResult } from "../types.js";
-declare const kenariWebSearchParams: Type.TObject<{
-    query: Type.TString;
-    max_results: Type.TOptional<Type.TInteger>;
+declare const kenariWebSearchParams: import("@oh-my-pi/omptype/typebox").TObject<{
+    readonly query: import("@oh-my-pi/omptype/typebox").TString;
+    readonly max_results: import("@oh-my-pi/omptype/typebox").TOptional<import("@oh-my-pi/omptype/typebox").TNumber>;
 }>;
 export interface KenariWebSearchDetails {
     query: string;
