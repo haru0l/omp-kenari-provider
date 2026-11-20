@@ -39,7 +39,7 @@ describe("provider registration", () => {
     streamSimple?: unknown;
   }
 
-  function capture() {
+  async function capture() {
     const providers: { id: string; config: CapturedConfig }[] = [];
     const tools: string[] = [];
     const omp = {
@@ -51,12 +51,22 @@ describe("provider registration", () => {
       },
       on: () => {},
     };
-    register(omp as never);
+    // The factory discovers catalogs up front; stay offline so it uses the
+    // static baseline and the assertions below stay deterministic.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error("offline in tests");
+    }) as typeof fetch;
+    try {
+      await register(omp as never);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
     return { providers, tools };
   }
 
-  it("registers System One models as judge models on the typesafe api", () => {
-    const { providers } = capture();
+  it("registers System One models as judge models on the typesafe api", async () => {
+    const { providers } = await capture();
     const [provider] = providers;
 
     expect(provider?.id).toBe("kenari");
@@ -77,8 +87,8 @@ describe("provider registration", () => {
     }
   });
 
-  it("gives chat models the /v1 base so omp appends /chat/completions once", () => {
-    const { providers } = capture();
+  it("gives chat models the /v1 base so omp appends /chat/completions once", async () => {
+    const { providers } = await capture();
     const chatModels =
       providers[0]?.config.models.filter((m) => m.kind !== "judge") ?? [];
 
@@ -88,8 +98,8 @@ describe("provider registration", () => {
     }
   });
 
-  it("does not use the pi-only registration surfaces", () => {
-    const { providers } = capture();
+  it("does not use the pi-only registration surfaces or a dynamic model manager", async () => {
+    const { providers } = await capture();
     const config = providers[0]?.config;
 
     // `classifiers` does not exist in omp; registering it is dead weight that
@@ -98,21 +108,29 @@ describe("provider registration", () => {
     // `openai-completions` is built into omp, so a custom stream is unnecessary
     // and would bypass omp's own retry and normalization layers.
     expect(config?.streamSimple).toBeUndefined();
-    // Discovery is `fetchDynamicModels`, not `refreshModels`.
-    expect(config?.fetchDynamicModels).toBeTypeOf("function");
+    // Discovery runs in the factory, not through a dynamic model manager: one
+    // provider cannot serve two base URLs once `fetchDynamicModels` installs
+    // one (see the comment in src/index.ts).
+    expect(config?.fetchDynamicModels).toBeUndefined();
   });
 
-  it("wires up login and env-var auth", () => {
-    const { providers } = capture();
+  it("names an env key but never builds the auth header itself", async () => {
+    const { providers } = await capture();
     const config = providers[0]?.config;
 
     expect(config?.apiKey).toBe("KENARI_API_KEY");
-    expect(config?.authHeader).toBe(true);
     expect(config?.oauth).toBeDefined();
+
+    // `authHeader: true` makes omp compose `Authorization: Bearer <apiKey>`
+    // from the *literal* config string, so an unset env var ships
+    // "Bearer KENARI_API_KEY" and every call 401s — bypassing the auth cascade
+    // that holds the key saved by `/login kenari`. Leave header building to the
+    // cascade.
+    expect(config?.authHeader).toBeUndefined();
   });
 
-  it("registers only the image and web-search tools", () => {
-    const { tools } = capture();
+  it("registers only the image and web-search tools", async () => {
+    const { tools } = await capture();
     // System One is judge-model only: omp reaches it through the `judge` role,
     // so there is no system_one tool to register.
     expect(tools).not.toContain("system_one");

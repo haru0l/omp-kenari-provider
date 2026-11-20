@@ -76,14 +76,17 @@ export const KENARI_FREE_ROUTE_MODEL: KenariOpenAIModel = {
 };
 /** Static baseline models — used for offline init before first fetch. Prices from live catalog. */
 export const KENARI_BASELINE_MODELS: KenariOpenAIModel[] = [
+  // Only used before the first live fetch, so these must be ids kenari still
+  // serves: a stale baseline is what a user gets when discovery fails, and an
+  // id the gateway has retired answers 400 model_not_found on every call.
   {
-    id: "step-3-7-flash:free",
-    name: "Step 3.7 Flash (Free)",
+    id: "beam-1-0:free",
+    name: "Beam 1.0 (Free)",
     api: "openai-completions",
     provider: PROVIDER_KENARI,
     baseUrl: BASE_URL_KENARI,
-    reasoning: true,
-    input: ["text", "image"],
+    reasoning: false,
+    input: ["text"],
     cost: ZERO_COST,
     contextWindow: 262144,
     maxTokens: 65536,
@@ -91,22 +94,32 @@ export const KENARI_BASELINE_MODELS: KenariOpenAIModel[] = [
     isFree: true,
   },
   {
-    id: "step-3-7-flash",
-    name: "Step 3.7 Flash",
+    id: "glm-4-7-flash:free",
+    name: "GLM 4.7 Flash (Free)",
     api: "openai-completions",
     provider: PROVIDER_KENARI,
     baseUrl: BASE_URL_KENARI,
-    reasoning: true,
+    reasoning: false,
+    input: ["text"],
+    cost: ZERO_COST,
+    contextWindow: 200000,
+    maxTokens: 65536,
+    compat: KENARI_COMPAT,
+    isFree: true,
+  },
+  {
+    id: "qwen3-5-397b-a17b:free",
+    name: "Qwen3.5 397B (Free)",
+    api: "openai-completions",
+    provider: PROVIDER_KENARI,
+    baseUrl: BASE_URL_KENARI,
+    reasoning: false,
     input: ["text", "image"],
-    cost: microIdrCost({
-      input: 4_200_000_000,
-      output: 24_000_000_000,
-      cache_read: 840_000_000,
-    }),
+    cost: ZERO_COST,
     contextWindow: 262144,
     maxTokens: 65536,
     compat: KENARI_COMPAT,
-    isFree: false,
+    isFree: true,
   },
   KENARI_FREE_ROUTE_MODEL,
 ];

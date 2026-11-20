@@ -25,7 +25,7 @@
  *     wants the origin while every other kenari surface wants `/v1`.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-export default function (omp: ExtensionAPI): void;
+export default function (omp: ExtensionAPI): Promise<void>;
 export { createEmbeddings } from "./api/embeddings.js";
 export { decodeImage, generateImageBytes, generateImages, } from "./api/images.js";
 export { moderateContent } from "./api/moderations.js";

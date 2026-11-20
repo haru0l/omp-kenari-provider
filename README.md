@@ -6,7 +6,7 @@ kenari is an LLM gateway — one base URL (`https://kenari.id/v1`) speaks both t
 
 ## Features
 
-- **Dynamic model discovery** — fetches the full catalog from `GET /v1/models` (public, no key needed) through `fetchDynamicModels`
+- **Dynamic model discovery** — fetches both catalogs from `GET /v1/models` (public, no key needed) in the extension factory, falling back to a static baseline offline
 - **Dual wire formats** — supports both `openai-completions` and `anthropic-messages` APIs
 - **:free models** — surfaces free-tier variants (e.g. `step-3-7-flash:free`) that deduct no balance
 - **Image generation** — `POST /v1/images/generations` (OpenAI Images-compatible)
@@ -85,6 +85,8 @@ omp appends a path to whatever base URL a model is given, and kenari's two surfa
 
 One provider-level `baseUrl` cannot serve both, so every registered model carries its own. Judge models use the bare origin; everything else uses `/v1`. Getting this wrong requests `/v1/v1/systemone`, which is why it is stated explicitly and pinned by tests.
 
+Discovery deliberately does **not** use omp's `fetchDynamicModels` hook: installing a dynamic model manager makes omp project every model of that provider onto the provider-level `baseUrl`, discarding a model's own. That would send every judge to `/v1/v1/systemone`. The catalogs are fetched in the extension factory instead, which leaves per-model `baseUrl` intact — and keeps one provider, so the single `/login kenari` credential serves chat, judges, images and web search alike.
+
 ## System One
 
 System One models answer bounded questions about state you supply. They are not chat models, so they never appear in `/model` — they are registered as omp **judge** models (`api: "typesafe"`, `kind: "judge"`).
@@ -111,7 +113,7 @@ The extension entry point. Registers the kenari provider with omp.
 
 ### `fetchKenariDynamicModels(apiKey?: string): Promise<KenariModel[]>`
 
-Discover and convert the kenari chat catalog. This is the function omp calls through the provider's `fetchDynamicModels` hook; a failed fetch degrades to the static baseline rather than throwing.
+Discover and convert the kenari chat catalog. Called from the extension factory; a failed fetch degrades to the static baseline rather than throwing.
 
 ### `fetchKenariSystemOneDynamicModels(apiKey?: string): Promise<KenariSystemOneModel[]>`
 

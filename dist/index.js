@@ -24,7 +24,7 @@
  *     they carry their own per-model `baseUrl` because the `typesafe` wire
  *     wants the origin while every other kenari surface wants `/v1`.
  */
-import { BASE_URL_KENARI, PROVIDER_KENARI } from "./constants.js";
+import { BASE_URL_KENARI, KENARI_API_KEY_ENV, PROVIDER_KENARI, } from "./constants.js";
 import { fetchKenariDynamicModels, getKenariBaselineModels, } from "./models.js";
 import { fetchKenariSystemOneDynamicModels, getKenariSystemOneBaselineModels, toProviderJudgeConfigs, } from "./systemone.js";
 import { generateImageTool } from "./tools/image.js";
@@ -62,26 +62,44 @@ function toProviderModelConfigs(models) {
 // =============================================================================
 // Extension entry point
 // =============================================================================
-export default function (omp) {
-    const baselineChatConfigs = toProviderModelConfigs(getKenariBaselineModels());
-    // System One models are judge models: they answer bounded questions instead of
-    // generating text, so they live in omp's `judge` role rather than /model.
-    // They carry their own origin baseUrl; chat models carry the /v1 one.
-    const baselineJudgeConfigs = toProviderJudgeConfigs(getKenariSystemOneBaselineModels());
+export default async function (omp) {
+    /**
+     * Discover both catalogs up front.
+     *
+     * This runs in the extension factory rather than through the provider's
+     * `fetchDynamicModels`, and that is deliberate. omp resolves ONE `baseUrl` per
+     * provider: with a dynamic model manager installed it projects every model of
+     * that provider onto the provider-level URL, ignoring a model's own `baseUrl`.
+     * kenari needs two — `https://kenari.id/v1` for chat and the bare origin for
+     * the `typesafe` judge wire, which appends `/v1/systemone` — so a dynamic
+     * manager would send every judge to `/v1/v1/systemone`.
+     *
+     * Without it, omp honours per-model `baseUrl` (proven by test), so one
+     * provider serves both surfaces and, crucially, keeps ONE credential: omp keys
+     * credential lookups strictly by provider id, so a second provider id could
+     * never read the key that `/login kenari` stores.
+     *
+     * Discovery is best-effort: a failed fetch falls back to the static baseline,
+     * matching what `fetchDynamicModels` did.
+     */
+    const [chatModels, judgeModels] = await Promise.all([
+        fetchKenariDynamicModels(undefined),
+        fetchKenariSystemOneDynamicModels(undefined),
+    ]);
     omp.registerProvider(PROVIDER_KENARI, {
         baseUrl: BASE_URL_KENARI,
         api: "openai-completions",
-        // A plain env-var name; omp resolves it, and a key stored by
-        // `/login kenari` wins over it because `oauth` is present.
-        apiKey: "KENARI_API_KEY",
-        authHeader: true,
-        models: [...baselineChatConfigs, ...baselineJudgeConfigs],
-        // No `streamSimple`: `openai-completions` is a built-in omp API and omp
-        // dispatches these chat models through its own transport.
-        //
-        // No `classifiers`: omp has no classifier concept. The System One models
-        // above are `kind: "judge"` on the built-in `typesafe` api instead, which
-        // is what wires them into the judge role.
+        // Names a credential source for omp's auth cascade but must NOT build a
+        // header: with `authHeader: true`, omp composes
+        // `Authorization: Bearer <apiKey>` from this *literal string*
+        // (createConfigHeaderResolver), so an unset env var ships
+        // "Bearer KENARI_API_KEY" and every call 401s — bypassing the cascade that
+        // correctly resolves the key saved by `/login kenari`.
+        apiKey: KENARI_API_KEY_ENV,
+        models: [
+            ...toProviderModelConfigs(chatModels),
+            ...toProviderJudgeConfigs(judgeModels),
+        ],
         // API-key login so /login kenari stores the key for later sessions.
         oauth: {
             name: "kenari API key",
@@ -99,25 +117,6 @@ export default function (omp) {
             },
             refreshToken: async (credentials) => credentials,
             getApiKey: (credentials) => credentials.access,
-        },
-        /**
-         * Live discovery. omp calls this with the resolved API key and replaces the
-         * extension-provided models with whatever it returns, falling back to the
-         * static `models` above when the fetch fails.
-         *
-         * Both catalogs are fetched: the chat catalog from the bare endpoint and the
-         * judge catalog from `?modality=systemone`. Each model keeps its own
-         * `baseUrl`, so the judge entries stay on the origin.
-         */
-        fetchDynamicModels: async (apiKey) => {
-            const [chatModels, judgeModels] = await Promise.all([
-                fetchKenariDynamicModels(apiKey),
-                fetchKenariSystemOneDynamicModels(apiKey),
-            ]);
-            return [
-                ...toProviderModelConfigs(chatModels),
-                ...toProviderJudgeConfigs(judgeModels),
-            ];
         },
     });
     // generate_image: draw with kenari image models, render inline, save to cwd.
