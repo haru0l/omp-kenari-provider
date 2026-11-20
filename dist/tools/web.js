@@ -34,6 +34,10 @@ function renderResults(results) {
 export const kenariWebSearchTool = {
     name: "kenari_web_search",
     label: "Kenari Web Search",
+    // omp defaults a non-builtin tool name to "discoverable", which hides it from
+    // the top-level tool list. "essential" keeps it advertised every session so
+    // the model reaches for it without having to discover it first.
+    loadMode: "essential",
     description: "Search the live web through kenari's web search endpoint and return ranked results with titles, URLs and snippets. " +
         "Use it when the answer depends on current information the model cannot know: news, prices, weather, releases, documentation that may have changed. " +
         "It returns snippets, not full pages — search first, then fetch a promising URL when the snippet is not enough. " +

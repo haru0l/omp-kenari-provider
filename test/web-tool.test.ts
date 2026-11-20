@@ -6,6 +6,16 @@ describe("kenari_web_search tool", () => {
     vi.unstubAllGlobals();
   });
 
+  it("is registered top-level, not merely discoverable", () => {
+    // omp defaults a non-builtin name to "discoverable", which keeps the tool
+    // out of the top-level list. Losing this makes the tool reachable only via
+    // discovery, which is not what the extension promises.
+    expect(kenariWebSearchTool.loadMode).toBe("essential");
+    // Distinct from omp's built-in `web_search` on purpose: replacing it would
+    // shadow the built-in for every session.
+    expect(kenariWebSearchTool.name).toBe("kenari_web_search");
+  });
+
   function context(apiKey: string | null = "kn-test") {
     return {
       cwd: process.cwd(),
