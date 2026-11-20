@@ -145,8 +145,8 @@ async function writeUnique(file: string, bytes: Uint8Array): Promise<string> {
 }
 
 /**
- * The `generate_image` tool. Like `system_one`, it reads kenari credentials from
- * the model registry rather than holding a key of its own.
+ * The `generate_image` tool. It reads kenari credentials from the model
+ * registry rather than holding a key of its own.
  */
 export const generateImageTool: ToolDefinition<
   typeof generateImageParams,

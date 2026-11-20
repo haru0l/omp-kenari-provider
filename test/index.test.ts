@@ -111,11 +111,14 @@ describe("provider registration", () => {
     expect(config?.oauth).toBeDefined();
   });
 
-  it("registers every tool", () => {
+  it("registers only the image and web-search tools", () => {
     const { tools } = capture();
-    expect(tools).toContain("system_one");
+    // System One is judge-model only: omp reaches it through the `judge` role,
+    // so there is no system_one tool to register.
+    expect(tools).not.toContain("system_one");
     expect(tools).toContain("generate_image");
     // Distinct from omp's built-in `web_search` on purpose.
     expect(tools).toContain("kenari_web_search");
+    expect(tools).toHaveLength(2);
   });
 });

@@ -100,8 +100,8 @@ async function writeUnique(file, bytes) {
     throw new Error(`generate_image: no free filename near "${file}" after 1000 attempts`);
 }
 /**
- * The `generate_image` tool. Like `system_one`, it reads kenari credentials from
- * the model registry rather than holding a key of its own.
+ * The `generate_image` tool. It reads kenari credentials from the model
+ * registry rather than holding a key of its own.
  */
 export const generateImageTool = {
     name: "generate_image",

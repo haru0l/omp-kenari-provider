@@ -25,7 +25,6 @@
  *     wants the origin while every other kenari surface wants `/v1`.
  */
 
-import { fileURLToPath } from "node:url";
 import type { Model, OAuthCredentials } from "@oh-my-pi/pi-ai";
 import type {
   ExtensionAPI,
@@ -42,7 +41,6 @@ import {
   toProviderJudgeConfigs,
 } from "./systemone.js";
 import { generateImageTool } from "./tools/image.js";
-import { systemOneTool } from "./tools/systemone.js";
 import { kenariWebSearchTool } from "./tools/web.js";
 import type { KenariModel } from "./types.js";
 // =============================================================================
@@ -147,20 +145,12 @@ export default function (omp: ExtensionAPI) {
     },
   });
 
-  // system_one: bounded judgments through kenari's System One models.
-  omp.registerTool(systemOneTool);
-
   // generate_image: draw with kenari image models, render inline, save to cwd.
   omp.registerTool(generateImageTool);
 
   // kenari_web_search: live web search, authenticated by the /login kenari key.
   omp.registerTool(kenariWebSearchTool);
 
-  // Ship the skill with the extension. Resolving the path from this module
-  // means an installed package and a local checkout both find it.
-  omp.on("resources_discover", () => ({
-    skillPaths: [fileURLToPath(new URL("../skills", import.meta.url))],
-  }));
 }
 
 export { createEmbeddings } from "./api/embeddings.js";
@@ -171,7 +161,6 @@ export {
 } from "./api/images.js";
 export { moderateContent } from "./api/moderations.js";
 export { rerankDocuments } from "./api/rerank.js";
-export { runSystemOne } from "./api/systemone.js";
 export { webFetch, webSearch, xSearch } from "./api/web.js";
 // Re-export for programmatic use.
 export {
@@ -192,16 +181,6 @@ export type {
   KenariModel,
   KenariOpenAIModel,
   KenariPricingLine,
-  KenariSystemOneAnswer,
-  KenariSystemOneBoxAnswer,
-  KenariSystemOneChoiceAnswer,
-  KenariSystemOneImageAsset,
-  KenariSystemOneNoulAnswer,
-  KenariSystemOneOptions,
-  KenariSystemOneQuestion,
-  KenariSystemOneQuestionType,
-  KenariSystemOneResponse,
-  KenariSystemOneScoreAnswer,
   KenariWebFetchOptions,
   KenariWebFetchResponse,
   KenariWebMeta,

@@ -9,8 +9,7 @@
  * knowing anything about kenari.
  *
  * The models come from `GET /v1/models?modality=systemone` — they are absent
- * from the bare chat catalog. For the full kenari contract (`box` questions,
- * audio and video input) use the `system_one` tool instead.
+ * from the bare chat catalog.
  *
  * Base URL note: the `typesafe` wire targets `{baseUrl}/v1/systemone`, so these
  * models carry {@link BASE_URL_KENARI_ORIGIN} — the origin, without `/v1` —
@@ -301,155 +300,6 @@ export function getKenariSystemOneBaselineModels(): KenariSystemOneModel[] {
   return KENARI_SYSTEMONE_BASELINE_MODELS;
 }
 
-/**
- * Input rate in USD per 1M tokens for a System One model id; 0 when unknown.
- *
- * Consults the live catalog's rate first: a paid model kenari ships tomorrow is
- * absent from the static baseline, and pricing it as free would hide real
- * spend. Falls back to the baseline for ids the catalog does not carry.
- */
-export function getKenariSystemOneInputRate(modelId: string): number {
-  const live = getKenariSystemOneModelCatalog().find((m) => m.id === modelId);
-  if (live) {
-    return live.isFree || live.inputMicroIdr === undefined
-      ? 0
-      : live.inputMicroIdr * MICRO_IDR_PER_1M_TO_USD_PER_1M;
-  }
-  const model = KENARI_SYSTEMONE_BASELINE_MODELS.find((m) => m.id === modelId);
-  return model?.cost.input ?? 0;
-}
-
-// =============================================================================
-// Model choice catalog
-// =============================================================================
-
-/**
- * A catalog entry, for choosing a model rather than running one.
- *
- * Keeps the catalog's raw input modalities and the rate kenari quotes, so a
- * caller can justify a choice rather than guess.
- */
-export interface KenariSystemOneModelInfo {
-  id: string;
-  name: string;
-  isFree: boolean;
-  /** Input modalities the model accepts: text, image, audio, video. */
-  input: string[];
-  /** Catalog rate in micro-Rupiah per 1M input tokens; absent when free. */
-  inputMicroIdr?: number;
-}
-
-/** Convert a judge model to a catalog entry. */
-export function toKenariSystemOneModelInfo(
-  model: KenariSystemOneModel,
-): KenariSystemOneModelInfo {
-  return {
-    id: model.id,
-    name: model.name,
-    isFree: model.isFree === true,
-    // A typesafe judge carries text and image only: omp cannot send audio or
-    // video, and the tool's assets are PNG/JPEG.
-    input: [...model.input],
-    ...(model.inputMicroIdr !== undefined
-      ? { inputMicroIdr: model.inputMicroIdr }
-      : {}),
-  };
-}
-
-/** Convert a live `?modality=systemone` entry to a catalog entry. */
-export function apiModelToKenariSystemOneModelInfo(
-  apiModel: KenariApiModel,
-): KenariSystemOneModelInfo | null {
-  const id = apiModel.id;
-  // Nothing here can send `fields`, so a fields-only model is not a choice.
-  if (!id || isFieldsOnly(id)) return null;
-
-  const isFree = id.endsWith(":free") || apiModel.pricing?.free === true;
-  const microInput = microInputRate(apiModel.pricing);
-
-  return {
-    id,
-    name: apiModel.name ?? id,
-    isFree,
-    input: [...(apiModel.modalities?.input ?? ["text"])],
-    ...(!isFree && microInput !== undefined
-      ? { inputMicroIdr: microInput }
-      : {}),
-  };
-}
-
-/** The static catalog: every baseline model. */
-export const KENARI_SYSTEMONE_MODEL_INFO: readonly KenariSystemOneModelInfo[] =
-  KENARI_SYSTEMONE_BASELINE_MODELS.map(toKenariSystemOneModelInfo);
-
-/** How long a fetched catalog is trusted before model choice re-fetches it. */
-const MODEL_INFO_TTL_MS = 5 * 60_000;
-
-let modelInfoCache:
-  | { models: KenariSystemOneModelInfo[]; fetchedAt: number }
-  | undefined;
-
-/** Cache a fetched catalog for model choice; returns what it stored. */
-function rememberSystemOneModelCatalog(
-  apiModels: KenariApiModel[],
-): KenariSystemOneModelInfo[] {
-  const models: KenariSystemOneModelInfo[] = [];
-  for (const apiModel of apiModels) {
-    const info = apiModelToKenariSystemOneModelInfo(apiModel);
-    if (info) models.push(info);
-  }
-  if (models.length > 0) {
-    modelInfoCache = { models, fetchedAt: Date.now() };
-  }
-  return models;
-}
-
-/**
- * The catalog model choice resolves against: the live one while it is fresh,
- * the static one otherwise. Never fetches — resolving a `model` argument must
- * not cost a network round trip.
- */
-export function getKenariSystemOneModelCatalog(): readonly KenariSystemOneModelInfo[] {
-  if (
-    modelInfoCache &&
-    Date.now() - modelInfoCache.fetchedAt < MODEL_INFO_TTL_MS
-  ) {
-    return modelInfoCache.models;
-  }
-  return KENARI_SYSTEMONE_MODEL_INFO;
-}
-
-/** Drop the cached catalog, so the next read falls back to the static one. */
-export function resetKenariSystemOneModelCatalog(): void {
-  modelInfoCache = undefined;
-}
-
-/** Where a catalog came from. */
-export type KenariSystemOneCatalogSource = "live" | "baseline";
-
-export interface KenariSystemOneCatalog {
-  models: KenariSystemOneModelInfo[];
-  source: KenariSystemOneCatalogSource;
-}
-
-/**
- * Fetch the catalog for model choice and cache it. The endpoint is public, so
- * this works before login; a failed fetch degrades to the static catalog
- * instead of failing the call.
- */
-export async function fetchKenariSystemOneModelCatalog(
-  signal?: AbortSignal,
-): Promise<KenariSystemOneCatalog> {
-  try {
-    const apiModels = await fetchKenariModelsByModality("systemone", signal);
-    const models = rememberSystemOneModelCatalog(apiModels);
-    if (models.length > 0) return { models, source: "live" };
-  } catch {
-    // Offline, or the catalog endpoint is unhappy: the static list still
-    // describes every model the baseline knows about.
-  }
-  return { models: [...KENARI_SYSTEMONE_MODEL_INFO], source: "baseline" };
-}
 
 // =============================================================================
 // Discovery
@@ -467,16 +317,14 @@ export async function fetchKenariSystemOneModels(
  * Discover the System One judge models for omp's `fetchDynamicModels` hook.
  *
  * The key is unused — the catalog endpoint is public — but the signature is
- * fixed by the contract. A failed fetch degrades to the static baseline so an
- * offline start still offers judge models; the live fetch also refreshes the
- * model-choice catalog.
+ * fixed by the contract. A failed fetch degrades to the static baseline, so an
+ * offline start still offers judge models.
  */
 export async function fetchKenariSystemOneDynamicModels(
   _apiKey: string | undefined,
 ): Promise<KenariSystemOneModel[]> {
   try {
     const apiModels = await fetchKenariModelsByModality("systemone");
-    rememberSystemOneModelCatalog(apiModels);
     const models = toKenariSystemOneModels(apiModels);
     return models.length > 0 ? models : KENARI_SYSTEMONE_BASELINE_MODELS;
   } catch {

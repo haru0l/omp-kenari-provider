@@ -7,9 +7,9 @@
  * collides at load or shadows the built-in one. The prefix also makes it
  * obvious in a transcript which search backend produced the result.
  *
- * Credentials come from the model registry, exactly like `system_one` and
- * `generate_image`: the key stored by `/login kenari` is the same one the chat
- * models use, so there is no separate secret to configure.
+ * Credentials come from the model registry, exactly like `generate_image`: the
+ * key stored by `/login kenari` is the same one the chat models use, so there
+ * is no separate secret to configure.
  */
 import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import type { KenariWebSearchResult } from "../types.js";
